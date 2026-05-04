@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 /// Terminal buffer size (scrollback)
-const BUFFER_ROWS: usize = 1000;
+const BUFFER_ROWS: usize = 10_000;
 const BUFFER_COLS: usize = 200;
 const DEFAULT_FLOATING_TERMINAL_RATIO: f32 = 0.9;
 const MIN_FLOATING_TERMINAL_RATIO: f32 = 0.2;
@@ -2379,6 +2379,39 @@ mod tests {
 
         assert_eq!(handled, TerminalMouseEventResult::Handled);
         assert_ne!(terminal.get_visible_lines(3, 20), before);
+    }
+
+    #[test]
+    fn repeated_scroll_wheel_reaches_oldest_retained_scrollback_line_after_long_output() {
+        let mut terminal = FloatingTerminal::new();
+        terminal.resize(4, 20);
+        for line in 1..=1_500 {
+            terminal.process_bytes(format!("line-{line}\r\n").as_bytes());
+        }
+        terminal.sessions[0].visible = true;
+
+        let content_area = TerminalContentArea {
+            x: 2,
+            y: 3,
+            width: 20,
+            height: 4,
+        };
+        for _ in 0..600 {
+            terminal.send_mouse_event(
+                crossterm::event::MouseEvent {
+                    kind: crossterm::event::MouseEventKind::ScrollUp,
+                    column: 2,
+                    row: 3,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+                content_area,
+            );
+        }
+
+        assert!(terminal
+            .get_visible_lines(4, 20)
+            .iter()
+            .any(|line| line.contains("line-1")));
     }
 
     #[test]
