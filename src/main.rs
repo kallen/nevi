@@ -1562,7 +1562,9 @@ fn main() -> anyhow::Result<()> {
             if let Err(e) = terminal.run_external_process(&cmd) {
                 editor.set_status(format!("Error running command: {}", e));
             }
-            editor.refresh_git_state();
+            if let Some(msg) = editor.handle_external_process_finished() {
+                editor.set_status(msg);
+            }
             needs_redraw = true;
             continue;
         }
