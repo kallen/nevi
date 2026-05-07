@@ -25,7 +25,7 @@ use crossterm::{
 };
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
@@ -41,6 +41,23 @@ const MAX_TITLE_LEN: usize = 120;
 const VISIBLE_OUTPUT_CHUNK_BYTES: usize = 256 * 1024;
 const BACKGROUND_OUTPUT_CHUNK_BYTES: usize = 32 * 1024;
 const MOUSE_SCROLL_LINES: i32 = 3;
+
+fn shell_supports_login_arg(shell: &str) -> bool {
+    let shell_name = Path::new(shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(shell);
+
+    matches!(shell_name, "bash" | "fish" | "zsh")
+}
+
+fn shell_command(shell: &str) -> CommandBuilder {
+    let mut cmd = CommandBuilder::new(shell);
+    if shell_supports_login_arg(shell) {
+        cmd.arg("-l");
+    }
+    cmd
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalContentArea {
@@ -624,7 +641,7 @@ impl TerminalSession {
         // Get user's shell
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
 
-        let mut cmd = CommandBuilder::new(&shell);
+        let mut cmd = shell_command(&shell);
         cmd.cwd(&self.working_dir);
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
@@ -2194,6 +2211,7 @@ impl Default for FloatingTerminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::sync::{Arc, Mutex};
 
     struct TestWriter {
@@ -2233,6 +2251,29 @@ mod tests {
     fn popup_size_clamps_configured_ratios() {
         assert_eq!(popup_size_for_screen(120, 40, 2.0, f32::NAN), (120, 36));
         assert_eq!(popup_size_for_screen(120, 40, 0.1, 0.1), (40, 10));
+    }
+
+    #[test]
+    fn shell_command_uses_login_shell_for_zsh() {
+        let cmd = shell_command("/bin/zsh");
+
+        assert_eq!(
+            cmd.get_argv(),
+            &vec![OsString::from("/bin/zsh"), OsString::from("-l")]
+        );
+    }
+
+    #[test]
+    fn shell_command_uses_login_shell_for_common_user_shells() {
+        assert!(shell_supports_login_arg("/opt/homebrew/bin/bash"));
+        assert!(shell_supports_login_arg("/opt/homebrew/bin/fish"));
+    }
+
+    #[test]
+    fn shell_command_does_not_add_login_arg_to_plain_sh() {
+        let cmd = shell_command("/bin/sh");
+
+        assert_eq!(cmd.get_argv(), &vec![OsString::from("/bin/sh")]);
     }
 
     #[test]
