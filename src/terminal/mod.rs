@@ -301,6 +301,47 @@ fn take_display_width(text: &str, start_col: usize, max_width: usize, tab_width:
     out
 }
 
+fn explorer_action_input_view(
+    input: &str,
+    cursor_byte_idx: usize,
+    field_width: usize,
+) -> (String, usize) {
+    if field_width == 0 {
+        return (String::new(), 0);
+    }
+
+    let mut cursor_byte_idx = cursor_byte_idx.min(input.len());
+    while cursor_byte_idx > 0 && !input.is_char_boundary(cursor_byte_idx) {
+        cursor_byte_idx -= 1;
+    }
+
+    let cursor_col = input[..cursor_byte_idx].chars().count();
+    let input_width = input.chars().count();
+
+    if input_width <= field_width {
+        return (
+            input.to_string(),
+            cursor_col.min(field_width.saturating_sub(1)),
+        );
+    }
+
+    let max_cursor_col = field_width.saturating_sub(1);
+    let start_col = cursor_col.saturating_sub(max_cursor_col);
+    let mut visible = String::with_capacity(field_width);
+
+    if start_col > 0 && field_width > 1 {
+        visible.push('…');
+        visible.extend(input.chars().skip(start_col + 1).take(field_width - 1));
+    } else {
+        visible.extend(input.chars().skip(start_col).take(field_width));
+    }
+
+    let cursor_x = cursor_col
+        .saturating_sub(start_col)
+        .min(field_width.saturating_sub(1));
+    (visible, cursor_x)
+}
+
 fn print_editor_char(ch: char, tab_width: usize) -> usize {
     let width = editor_char_display_width(ch, tab_width);
     if ch == '\t' {
@@ -1928,13 +1969,12 @@ impl Terminal {
             let input = &editor.explorer.input_buffer;
 
             let available = width.saturating_sub(prompt.len());
-            if input.len() <= available {
-                print!("{}", input);
-                let remaining = available.saturating_sub(input.len());
+            if available > 0 {
+                let (visible, _) =
+                    explorer_action_input_view(input, editor.explorer.input_cursor, available);
+                print!("{}", visible);
+                let remaining = available.saturating_sub(visible.chars().count());
                 print!("{:remaining$}", "", remaining = remaining);
-            } else {
-                let visible = &input[..available.saturating_sub(1)];
-                print!("{}…", visible);
             }
 
             // Show help text if available
@@ -2113,7 +2153,15 @@ impl Terminal {
                 // Show cursor in input/search modes, hide otherwise
                 if editor.explorer.has_pending_action() {
                     let prompt = editor.explorer.action_prompt();
-                    let cursor_x = prompt.len() + editor.explorer.input_cursor;
+                    let explorer_width = editor.explorer.width as usize;
+                    let available = explorer_width.saturating_sub(prompt.len());
+                    let (_, input_cursor_x) = explorer_action_input_view(
+                        &editor.explorer.input_buffer,
+                        editor.explorer.input_cursor,
+                        available,
+                    );
+                    let cursor_x =
+                        (prompt.len() + input_cursor_x).min(explorer_width.saturating_sub(1));
                     let cursor_y = editor.text_rows().saturating_sub(1) as u16;
                     execute!(
                         self.stdout,
@@ -8891,6 +8939,26 @@ mod tests {
     fn take_display_width_stops_before_expanded_tab_overflows() {
         assert_eq!(super::take_display_width("ab\tcd", 0, 5, 4), "ab");
         assert_eq!(super::take_display_width("ab\tcd", 0, 6, 4), "ab\t");
+    }
+
+    #[test]
+    fn explorer_action_input_view_keeps_cursor_visible_for_long_names() {
+        let input = "abcdefghijklmnopqrstuvwxyz";
+
+        let (visible, cursor_x) = super::explorer_action_input_view(input, input.len(), 10);
+
+        assert_eq!(visible, "…stuvwxyz");
+        assert_eq!(cursor_x, 9);
+    }
+
+    #[test]
+    fn explorer_action_input_view_preserves_prefix_while_cursor_near_start() {
+        let input = "abcdefghijklmnopqrstuvwxyz";
+
+        let (visible, cursor_x) = super::explorer_action_input_view(input, 5, 10);
+
+        assert_eq!(visible, "abcdefghij");
+        assert_eq!(cursor_x, 5);
     }
 
     #[test]
