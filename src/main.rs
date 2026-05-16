@@ -366,16 +366,7 @@ fn main() -> anyhow::Result<()> {
                             continue 'main_loop;
                         }
                         EditorEvent::Mouse(mouse) => {
-                            if editor.markdown_preview.is_some()
-                                && nevi::terminal::handle_markdown_preview_mouse(
-                                    &mut editor,
-                                    mouse,
-                                )
-                            {
-                                last_input_at = Some(Instant::now());
-                                needs_redraw = true;
-                                redraw_from_input = true;
-                            } else if editor.floating_terminal.is_visible() {
+                            if editor.floating_terminal.is_visible() {
                                 let terminal_settings = &editor.settings.terminal;
                                 let content_area = nevi::floating_terminal::content_area_for_screen(
                                     editor.term_width,
