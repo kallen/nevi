@@ -594,12 +594,12 @@ impl Terminal {
 
     /// Render the editor state to the terminal
     pub fn render(&mut self, editor: &Editor) -> anyhow::Result<()> {
-        self.set_mouse_capture(editor.floating_terminal.is_visible())?;
+        self.set_mouse_capture(Self::should_capture_mouse(editor))?;
         execute!(self.stdout, cursor::MoveTo(0, 0))?;
 
-        // Skip rendering background when finder is open - it's a large overlay
-        // that covers most of the screen, so rendering underneath is wasted work
-        let skip_background = editor.mode == Mode::Finder;
+        // Large overlays fully cover the content area, so repainting the editor
+        // behind them only wastes work and can flash between redraw phases.
+        let skip_background = Self::should_skip_background(editor);
 
         if !skip_background {
             let num_panes = editor.panes().len();
@@ -665,6 +665,11 @@ impl Terminal {
             self.render_code_actions_picker(editor)?;
         }
 
+        // Render Markdown preview if active
+        if editor.markdown_preview.is_some() {
+            self.render_markdown_preview(editor)?;
+        }
+
         // Render theme picker if active
         if editor.theme_picker.is_some() {
             self.render_theme_picker(editor)?;
@@ -673,6 +678,8 @@ impl Terminal {
         // Position cursor
         if editor.floating_terminal.is_visible() {
             self.render_floating_terminal(editor)?;
+        } else if editor.markdown_preview.is_some() {
+            execute!(self.stdout, cursor::Hide)?;
         } else {
             self.position_cursor(editor)?;
         }
@@ -3648,6 +3655,47 @@ impl Terminal {
         (popup_x, popup_y)
     }
 
+    fn markdown_preview_rect(editor: &Editor) -> crate::editor::Rect {
+        let width = crate::markdown_preview::preview_popup_width(editor.term_width);
+        let max_height = editor.term_height.saturating_sub(4);
+        let height = max_height.max(editor.term_height.min(5));
+
+        crate::editor::Rect::new(
+            (editor.term_width.saturating_sub(width)) / 2,
+            (editor.term_height.saturating_sub(height)) / 2,
+            width,
+            height,
+        )
+    }
+
+    fn markdown_preview_visible_rows(editor: &Editor) -> usize {
+        Self::markdown_preview_rect(editor).height.saturating_sub(3) as usize
+    }
+
+    fn markdown_preview_footer(scroll: usize, total_rows: usize, visible_rows: usize) -> String {
+        let position = if total_rows == 0 {
+            "0/0".to_string()
+        } else {
+            let start = scroll.saturating_add(1).min(total_rows);
+            let end = scroll.saturating_add(visible_rows).min(total_rows).max(start);
+            if start == end {
+                format!("{start}/{total_rows}")
+            } else {
+                format!("{start}-{end}/{total_rows}")
+            }
+        };
+
+        format!(" j/k scroll • Ctrl-d/u page • g/G top/bottom • {position} • q close ")
+    }
+
+    fn should_capture_mouse(editor: &Editor) -> bool {
+        editor.floating_terminal.is_visible()
+    }
+
+    fn should_skip_background(editor: &Editor) -> bool {
+        editor.mode == Mode::Finder || editor.markdown_preview.is_some()
+    }
+
     /// Render the diagnostic floating popup (like vim.diagnostic.open_float())
     fn render_diagnostic_float(&mut self, editor: &Editor) -> anyhow::Result<()> {
         let diagnostics = editor.diagnostics_for_line(editor.cursor.line);
@@ -3779,6 +3827,175 @@ impl Terminal {
         print!("╯");
 
         execute!(self.stdout, ResetColor)?;
+        Ok(())
+    }
+
+    fn render_markdown_preview(&mut self, editor: &Editor) -> anyhow::Result<()> {
+        let Some(preview) = &editor.markdown_preview else {
+            return Ok(());
+        };
+
+        let rect = Self::markdown_preview_rect(editor);
+        let visible_rows = rect.height.saturating_sub(3) as usize;
+        let inner_width = rect.width.saturating_sub(2) as usize;
+        let display_lines = preview.display_lines();
+        let scroll = preview
+            .scroll
+            .min(display_lines.len().saturating_sub(visible_rows));
+        let theme = editor.theme();
+
+        execute!(
+            self.stdout,
+            SetForegroundColor(theme.ui.popup_border),
+            SetBackgroundColor(theme.ui.popup_bg),
+            cursor::MoveTo(rect.x, rect.y)
+        )?;
+        print!("╭");
+        let title = " Markdown Preview ";
+        let title_start = (rect.width as usize).saturating_sub(title.len()) / 2;
+        for i in 1..rect.width.saturating_sub(1) {
+            if i as usize == title_start {
+                print!("{title}");
+            } else if i as usize > title_start && (i as usize) < title_start + title.len() {
+                continue;
+            } else {
+                print!("─");
+            }
+        }
+        print!("╮");
+
+        for row in 0..visible_rows {
+            execute!(
+                self.stdout,
+                cursor::MoveTo(rect.x, rect.y + 1 + row as u16),
+                SetForegroundColor(theme.ui.popup_border),
+                SetBackgroundColor(theme.ui.popup_bg)
+            )?;
+            print!("│");
+
+            if let Some(line) = display_lines.get(scroll + row) {
+                Self::render_markdown_preview_line(&mut self.stdout, line, inner_width, editor)?;
+            } else {
+                print!("{:width$}", "", width = inner_width);
+            }
+
+            execute!(
+                self.stdout,
+                SetForegroundColor(theme.ui.popup_border),
+                SetBackgroundColor(theme.ui.popup_bg)
+            )?;
+            print!("│");
+        }
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(rect.x, rect.y + rect.height.saturating_sub(2)),
+            SetForegroundColor(theme.ui.line_number),
+            SetBackgroundColor(theme.ui.popup_bg)
+        )?;
+        print!("│");
+        let footer = Self::markdown_preview_footer(scroll, display_lines.len(), visible_rows);
+        let footer = take_display_width(&footer, 0, inner_width, editor.settings.editor.tab_width);
+        print!("{:^width$}", footer, width = inner_width);
+        execute!(self.stdout, SetForegroundColor(theme.ui.popup_border))?;
+        print!("│");
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(rect.x, rect.y + rect.height.saturating_sub(1)),
+            SetForegroundColor(theme.ui.popup_border),
+            SetBackgroundColor(theme.ui.popup_bg)
+        )?;
+        print!("╰");
+        for _ in 1..rect.width.saturating_sub(1) {
+            print!("─");
+        }
+        print!("╯");
+
+        execute!(self.stdout, ResetColor)?;
+        Ok(())
+    }
+
+    fn render_markdown_preview_line<W: Write>(
+        output: &mut W,
+        line: &crate::markdown_preview::PreviewLine,
+        width: usize,
+        editor: &Editor,
+    ) -> anyhow::Result<()> {
+        use crate::markdown_preview::{PreviewLineKind, PreviewSpanStyle};
+
+        let theme = editor.theme();
+        let mut written = 0usize;
+
+        if line.kind == PreviewLineKind::Rule {
+            execute!(output, SetForegroundColor(theme.ui.line_number))?;
+            write!(output, "{}", "─".repeat(width))?;
+            return Ok(());
+        }
+
+        for span in &line.spans {
+            let remaining = width.saturating_sub(written);
+            if remaining == 0 {
+                break;
+            }
+            let display: String = span.text.chars().take(remaining).collect();
+            let char_count = display.chars().count();
+
+            match span.style {
+                PreviewSpanStyle::Plain => {
+                    let fg = match line.kind {
+                        PreviewLineKind::Heading(_) => theme.syntax.function.fg,
+                        PreviewLineKind::Quote => theme.syntax.comment.fg,
+                        PreviewLineKind::CodeBlock => theme.syntax.string.fg,
+                        PreviewLineKind::Placeholder => theme.ui.line_number,
+                        _ => theme.ui.foreground,
+                    };
+                    execute!(
+                        output,
+                        SetForegroundColor(fg),
+                        SetAttribute(Attribute::Reset)
+                    )?;
+                }
+                PreviewSpanStyle::Emphasis => {
+                    execute!(
+                        output,
+                        SetForegroundColor(theme.ui.foreground),
+                        SetAttribute(Attribute::Italic)
+                    )?;
+                }
+                PreviewSpanStyle::Strong => {
+                    execute!(
+                        output,
+                        SetForegroundColor(theme.ui.foreground),
+                        SetAttribute(Attribute::Bold)
+                    )?;
+                }
+                PreviewSpanStyle::InlineCode => {
+                    execute!(
+                        output,
+                        SetForegroundColor(theme.syntax.string.fg),
+                        SetAttribute(Attribute::Reset)
+                    )?;
+                }
+                PreviewSpanStyle::Link => {
+                    execute!(
+                        output,
+                        SetForegroundColor(theme.syntax.function.fg),
+                        SetAttribute(Attribute::Underlined)
+                    )?;
+                }
+            }
+
+            write!(output, "{display}")?;
+            written += char_count;
+        }
+
+        execute!(
+            output,
+            SetAttribute(Attribute::Reset),
+            SetForegroundColor(theme.ui.foreground)
+        )?;
+        write!(output, "{:width$}", "", width = width.saturating_sub(written))?;
         Ok(())
     }
 
@@ -5755,6 +5972,34 @@ fn handle_theme_picker_key(editor: &mut Editor, key: KeyEvent) {
     }
 }
 
+fn handle_markdown_preview_key(editor: &mut Editor, key: KeyEvent) {
+    let visible_rows = Terminal::markdown_preview_visible_rows(editor).max(1);
+    let half_page = (visible_rows / 2).max(1) as isize;
+
+    match (key.modifiers, key.code) {
+        (KeyModifiers::NONE, KeyCode::Esc)
+        | (KeyModifiers::NONE, KeyCode::Char('q'))
+        | (KeyModifiers::CONTROL, KeyCode::Char('[')) => editor.close_markdown_preview(),
+        (KeyModifiers::NONE, KeyCode::Char('j')) | (KeyModifiers::NONE, KeyCode::Down) => {
+            editor.scroll_markdown_preview(1, visible_rows)
+        }
+        (KeyModifiers::NONE, KeyCode::Char('k')) | (KeyModifiers::NONE, KeyCode::Up) => {
+            editor.scroll_markdown_preview(-1, visible_rows)
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            editor.scroll_markdown_preview(half_page, visible_rows)
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            editor.scroll_markdown_preview(-half_page, visible_rows)
+        }
+        (KeyModifiers::NONE, KeyCode::Char('g')) => editor.jump_markdown_preview_to_top(),
+        (KeyModifiers::SHIFT, KeyCode::Char('G')) | (KeyModifiers::NONE, KeyCode::Char('G')) => {
+            editor.jump_markdown_preview_to_bottom(visible_rows)
+        }
+        _ => {}
+    }
+}
+
 /// Play a macro from a register
 fn play_macro(editor: &mut Editor, register: char, count: usize) {
     // Get the macro keys (clone to avoid borrow issues)
@@ -5814,6 +6059,12 @@ pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
 
         // Terminal apps need Escape; Ctrl-\ is the dedicated toggle key.
         editor.floating_terminal.send_key(key);
+        return;
+    }
+
+    // If Markdown preview is visible, it owns input until closed.
+    if editor.markdown_preview.is_some() {
+        handle_markdown_preview_key(editor, key);
         return;
     }
 
@@ -8552,6 +8803,11 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             }
         }
 
+        Command::MarkdownPreview => match editor.open_markdown_preview() {
+            Ok(()) => CommandResult::Ok,
+            Err(message) => CommandResult::Message(message.to_string()),
+        },
+
         Command::NoHighlight => {
             editor.search_matches.clear();
             CommandResult::Ok
@@ -9080,6 +9336,149 @@ mod tests {
         assert!(rendered.contains("\x1b[24m"));
         assert!(rendered.contains("\x1b[59m"));
         assert!(rendered.ends_with("\x1b[38;2;198;120;221m"));
+    }
+
+    #[test]
+    fn markdown_preview_command_opens_only_for_markdown_buffers() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_command");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        let rust_path = tmp.join("main.rs");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+        std::fs::write(&rust_path, "fn main() {}\n").expect("write rust");
+
+        let mut markdown = Editor::default();
+        markdown.open_file(markdown_path).expect("open markdown");
+        execute_command(&mut markdown, Command::MarkdownPreview);
+        assert!(markdown.markdown_preview.is_some());
+
+        let mut rust = Editor::default();
+        rust.open_file(rust_path).expect("open rust");
+        execute_command(&mut rust, Command::MarkdownPreview);
+        assert!(rust.markdown_preview.is_none());
+        assert_eq!(
+            rust.status_message.as_deref(),
+            Some("Markdown preview is only available for Markdown buffers")
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_rect_uses_ninety_percent_width_for_reading() {
+        let mut editor = Editor::default();
+        editor.set_size(140, 50);
+
+        let rect = Terminal::markdown_preview_rect(&editor);
+
+        assert_eq!(rect.width, 126);
+        assert_eq!(rect.height, 46);
+        assert_eq!(rect.x, 7);
+        assert_eq!(rect.y, 2);
+    }
+
+    #[test]
+    fn markdown_preview_keys_scroll_and_close_the_overlay() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_keys");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.open_file(markdown_path).expect("open markdown");
+        editor.replace_buffer_content(&(0..30).map(|i| format!("line {i}\n")).collect::<String>());
+        editor.open_markdown_preview().expect("open preview");
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, 1);
+
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
+        );
+        assert!(editor.markdown_preview.as_ref().unwrap().scroll > 1);
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(editor.markdown_preview.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_keys_jump_to_top_and_bottom() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_jump_keys");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.set_size(80, 20);
+        editor.open_file(markdown_path).expect("open markdown");
+        editor.replace_buffer_content(&(0..50).map(|i| format!("line {i}\n")).collect::<String>());
+        editor.open_markdown_preview().expect("open preview");
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        let visible_rows = Terminal::markdown_preview_visible_rows(&editor).max(1);
+        let max_scroll = editor
+            .markdown_preview
+            .as_ref()
+            .unwrap()
+            .max_scroll(visible_rows);
+        assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, max_scroll);
+
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, 0);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_footer_includes_position_and_jump_hint() {
+        assert_eq!(
+            Terminal::markdown_preview_footer(12, 42, 10),
+            " j/k scroll • Ctrl-d/u page • g/G top/bottom • 13-22/42 • q close "
+        );
+        assert_eq!(
+            Terminal::markdown_preview_footer(0, 1, 10),
+            " j/k scroll • Ctrl-d/u page • g/G top/bottom • 1/1 • q close "
+        );
+    }
+
+    #[test]
+    fn markdown_preview_does_not_capture_mouse_while_overlay_is_open() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_mouse_capture");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.open_file(markdown_path).expect("open markdown");
+        assert!(!Terminal::should_capture_mouse(&editor));
+
+        editor.open_markdown_preview().expect("open preview");
+        assert!(!Terminal::should_capture_mouse(&editor));
+
+        editor.close_markdown_preview();
+        assert!(!Terminal::should_capture_mouse(&editor));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn markdown_preview_skips_background_redraw_while_overlay_is_open() {
+        let tmp = unique_temp_dir("nevi_markdown_preview_skip_background");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let markdown_path = tmp.join("notes.md");
+        std::fs::write(&markdown_path, "# Notes\n").expect("write markdown");
+
+        let mut editor = Editor::default();
+        editor.open_file(markdown_path).expect("open markdown");
+        assert!(!Terminal::should_skip_background(&editor));
+
+        editor.open_markdown_preview().expect("open preview");
+        assert!(Terminal::should_skip_background(&editor));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

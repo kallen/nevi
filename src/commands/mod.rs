@@ -59,6 +59,8 @@ pub enum Command {
     FindDiagnostics,
     /// :DiagnosticFloat - Show diagnostic floating popup at cursor line
     DiagnosticFloat,
+    /// :MarkdownPreview - Open a rendered floating Markdown preview
+    MarkdownPreview,
     /// :noh or :nohlsearch - Clear search highlights
     NoHighlight,
     /// :s/pattern/replacement/flags or :%s/pattern/replacement/flags - Search and replace
@@ -336,6 +338,12 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         command: "DiagnosticFloat",
         aliases: &["diagnosticfloat", "df", "linediag"],
         description: "Show diagnostics at cursor line",
+        takes_args: false,
+    },
+    CommandSpec {
+        command: "MarkdownPreview",
+        aliases: &["markdownpreview", "mdpreview", "mdp"],
+        description: "Open rendered Markdown preview",
         takes_args: false,
     },
     CommandSpec {
@@ -824,6 +832,9 @@ pub fn parse_command(input: &str) -> Command {
             Command::FindDiagnostics
         }
         "DiagnosticFloat" | "diagnosticfloat" | "df" | "linediag" => Command::DiagnosticFloat,
+        "MarkdownPreview" | "markdownpreview" | "mdpreview" | "mdp" => {
+            Command::MarkdownPreview
+        }
 
         // Clear search highlight
         "noh" | "nohlsearch" => Command::NoHighlight,
@@ -1481,6 +1492,26 @@ mod tests {
                 .iter()
                 .any(|item| item.command == "DiagnosticFloat"),
             "expected DiagnosticFloat to match fuzzy query"
+        );
+    }
+
+    #[test]
+    fn markdown_preview_command_is_parseable_and_suggested() {
+        assert!(matches!(
+            parse_command("MarkdownPreview"),
+            Command::MarkdownPreview
+        ));
+        assert!(matches!(
+            parse_command("mdpreview"),
+            Command::MarkdownPreview
+        ));
+
+        let suggestions = command_suggestions("mdp", 8);
+        assert!(
+            suggestions
+                .iter()
+                .any(|item| item.command == "MarkdownPreview"),
+            "expected MarkdownPreview to match fuzzy query"
         );
     }
 

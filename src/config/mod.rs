@@ -1034,6 +1034,12 @@ fn default_config_template() -> &'static str {
 # action = ":w"
 # desc = "Save file"
 #
+# Example: open the Markdown preview with <leader>md
+# [[keymap.leader_mappings]]
+# key = "md"
+# action = ":MarkdownPreview"
+# desc = "Open Markdown preview"
+#
 # To override command-mode command-line UX bindings:
 # [[keymap.command_mappings]]
 # key = "<A-r>"

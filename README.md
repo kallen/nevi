@@ -34,6 +34,7 @@ A fast, native terminal editor where your existing vim/neovim muscle memory just
 - **File explorer** - Built-in tree view
 - **Git signs** - Gutter indicators for added/modified/deleted lines
 - **Harpoon-style quick file switching** - Pin and jump to frequently used files
+- **Markdown preview** - Open a fast, terminal-native rendered reader with `:MarkdownPreview`
 - **External formatter support** - Biome, Prettier, and other formatters
 - **Split windows** - Vertical and horizontal splits
 - **Configurable via TOML** - Simple, readable configuration
@@ -74,6 +75,7 @@ nevi file1.rs file2.rs
 - `:w` - Save
 - `:q` - Quit
 - `:wq` - Save and quit
+- `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
 - `<Space>ff` - Find files
 - `<Space>fg` - Live grep
 - `<Space>e` - File explorer

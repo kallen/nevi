@@ -12,6 +12,7 @@ pub mod harpoon;
 pub mod indent;
 pub mod input;
 pub mod lsp;
+pub mod markdown_preview;
 pub mod syntax;
 pub mod terminal;
 pub mod theme;
@@ -27,5 +28,9 @@ pub use explorer::FileExplorer;
 pub use finder::{FuzzyFinder, FinderMode, FloatingWindow};
 pub use frecency::FrecencyDb;
 pub use lsp::{LspManager, LspNotification, LspStatus, MultiLspManager, LanguageId};
+pub use markdown_preview::{
+    render_markdown, MarkdownPreview, MarkdownPreviewState, PreviewLine, PreviewLineKind,
+    PreviewSpan, PreviewSpanStyle,
+};
 pub use terminal::Terminal;
 pub use theme::{Theme, ThemeManager};
