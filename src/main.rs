@@ -36,6 +36,18 @@ fn profile_enabled_from_value(value: Option<&str>) -> bool {
         || value.eq_ignore_ascii_case("on")
 }
 
+fn editor_redraw_interval(
+    redraw_from_input: bool,
+    _render_interval: Duration,
+    lsp_render_interval: Duration,
+) -> Duration {
+    if redraw_from_input {
+        Duration::ZERO
+    } else {
+        lsp_render_interval
+    }
+}
+
 fn editor_lsp_cursor_col(editor: &Editor) -> u32 {
     editor_lsp_col(editor, editor.cursor.line, editor.cursor.col)
 }
@@ -1701,11 +1713,8 @@ fn main() -> anyhow::Result<()> {
         // Render (debounced to avoid excessive redraws during LSP spam)
         if needs_redraw {
             let now = Instant::now();
-            let interval = if redraw_from_input {
-                render_interval
-            } else {
-                lsp_render_interval
-            };
+            let interval =
+                editor_redraw_interval(redraw_from_input, render_interval, lsp_render_interval);
             if now.duration_since(last_render) >= interval {
                 // Update size before render
                 if let Ok((w, h)) = Terminal::size() {
@@ -2150,7 +2159,7 @@ mod tests {
     use nevi::lsp::types::{Diagnostic, DiagnosticSeverity, TextEdit};
     use nevi::Editor;
     use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -2196,6 +2205,21 @@ mod tests {
         assert!(profile_enabled_from_value(Some("true")));
         assert!(profile_enabled_from_value(Some("YES")));
         assert!(profile_enabled_from_value(Some("on")));
+    }
+
+    #[test]
+    fn input_redraws_are_not_debounced_behind_background_render_interval() {
+        let render_interval = Duration::from_millis(16);
+        let lsp_render_interval = Duration::from_millis(50);
+
+        assert_eq!(
+            super::editor_redraw_interval(true, render_interval, lsp_render_interval),
+            Duration::ZERO
+        );
+        assert_eq!(
+            super::editor_redraw_interval(false, render_interval, lsp_render_interval),
+            lsp_render_interval
+        );
     }
 
     #[test]

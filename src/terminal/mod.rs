@@ -14,6 +14,7 @@ use crossterm::{
 use std::io::{self, Stdout, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use unicode_width::UnicodeWidthChar;
 
 /// Enable finder profiling (writes to /tmp/nevi_finder_profile.log)
 pub static FINDER_PROFILE_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -268,8 +269,10 @@ fn apply_diagnostic_underline<W: Write>(
 fn editor_char_display_width(ch: char, tab_width: usize) -> usize {
     if ch == '\t' {
         tab_width.max(1)
-    } else {
+    } else if ch.is_control() {
         1
+    } else {
+        UnicodeWidthChar::width(ch).unwrap_or(0)
     }
 }
 
@@ -277,6 +280,25 @@ fn text_display_width(text: &str, tab_width: usize) -> usize {
     text.chars()
         .filter(|ch| *ch != '\n')
         .map(|ch| editor_char_display_width(ch, tab_width))
+        .sum()
+}
+
+fn display_width_between_char_cols(
+    text: &str,
+    start_col: usize,
+    end_col: usize,
+    tab_width: usize,
+) -> usize {
+    if end_col <= start_col {
+        return 0;
+    }
+
+    text.chars()
+        .enumerate()
+        .skip(start_col)
+        .take(end_col - start_col)
+        .take_while(|(_, ch)| *ch != '\n')
+        .map(|(_, ch)| editor_char_display_width(ch, tab_width))
         .sum()
 }
 
@@ -354,7 +376,7 @@ fn print_editor_char(ch: char, tab_width: usize) -> usize {
         1
     } else {
         print!("{}", ch);
-        1
+        width
     }
 }
 
@@ -595,7 +617,7 @@ impl Terminal {
     /// Render the editor state to the terminal
     pub fn render(&mut self, editor: &Editor) -> anyhow::Result<()> {
         self.set_mouse_capture(Self::should_capture_mouse(editor))?;
-        execute!(self.stdout, cursor::MoveTo(0, 0))?;
+        execute!(self.stdout, cursor::Hide, cursor::MoveTo(0, 0))?;
 
         // Large overlays fully cover the content area, so repainting the editor
         // behind them only wastes work and can flash between redraw phases.
@@ -2250,13 +2272,19 @@ impl Terminal {
                         if editor.cursor.col >= segment.start_col && editor.cursor.col < segment_end
                         {
                             // Cursor is in this segment
-                            cursor_visual_col = editor.cursor.col - segment.start_col;
+                            cursor_visual_col = display_width_between_char_cols(
+                                &cursor_line_content,
+                                segment.start_col,
+                                editor.cursor.col,
+                                tab_width,
+                            );
                             // Add indentation offset for wrapped lines
                             if !segment.is_first {
                                 let indent_len = cursor_line_content
                                     .chars()
                                     .take_while(|c| c.is_whitespace())
-                                    .count();
+                                    .map(|c| editor_char_display_width(c, tab_width))
+                                    .sum::<usize>();
                                 cursor_visual_col += indent_len;
                             }
                             break;
@@ -2271,7 +2299,7 @@ impl Terminal {
                         cursor_visual_row = visual_row + segments.len().saturating_sub(1);
                         let last_segment = segments.last().unwrap();
                         cursor_visual_col =
-                            last_segment.text.trim_end_matches('\n').chars().count();
+                            text_display_width(last_segment.text.trim_end_matches('\n'), tab_width);
                     }
 
                     // Sign column (2) + line numbers + cursor position
@@ -2289,7 +2317,17 @@ impl Terminal {
                         .line
                         .saturating_sub(active_pane.viewport_offset);
                     // Sign column (2) + line numbers + cursor position (adjusted for horizontal scroll)
-                    let display_col = editor.cursor.col.saturating_sub(active_pane.h_offset);
+                    let cursor_line_content = editor
+                        .buffer()
+                        .line(editor.cursor.line)
+                        .map(|l| l.to_string())
+                        .unwrap_or_default();
+                    let display_col = display_width_between_char_cols(
+                        &cursor_line_content,
+                        active_pane.h_offset,
+                        editor.cursor.col,
+                        tab_width,
+                    );
                     let cursor_col = 2 + if show_line_numbers {
                         line_num_width + 1 + display_col
                     } else {
@@ -9192,9 +9230,27 @@ mod tests {
     }
 
     #[test]
+    fn editor_char_display_width_counts_full_width_characters() {
+        assert_eq!(super::editor_char_display_width('，', 4), 2);
+        assert_eq!(super::text_display_width("，，，，", 4), 8);
+        assert_eq!(super::take_display_width("，，，", 0, 4, 4), "，，");
+    }
+
+    #[test]
     fn take_display_width_stops_before_expanded_tab_overflows() {
         assert_eq!(super::take_display_width("ab\tcd", 0, 5, 4), "ab");
         assert_eq!(super::take_display_width("ab\tcd", 0, 6, 4), "ab\t");
+    }
+
+    #[test]
+    fn display_width_between_char_cols_measures_visible_cursor_prefix() {
+        assert_eq!(
+            super::display_width_between_char_cols("，，，，", 0, 4, 4),
+            8
+        );
+        assert_eq!(super::display_width_between_char_cols("a，b", 0, 2, 4), 3);
+        assert_eq!(super::display_width_between_char_cols("ab，，", 1, 4, 4), 5);
+        assert_eq!(super::display_width_between_char_cols("x\tz", 0, 2, 4), 5);
     }
 
     #[test]
