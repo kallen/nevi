@@ -4952,11 +4952,9 @@ impl Terminal {
         let show_scroll_indicator = total_items > list_height;
         let scroll_indicator_color = Color::DarkGrey;
 
-        // Draw items with scrolling (starts at row 1, after top border)
-        // Telescope-style: best matches at BOTTOM (closest to input)
-        let visible_count = list_height.min(total_items.saturating_sub(scroll_offset));
-        let first_item_row = list_height - visible_count; // Empty rows above items
-
+        // Draw items with scrolling (starts at row 1, after top border).
+        // Fuzzy search modes keep best matches near the input; fixed Git changes
+        // results are top-aligned so short lists do not leave a large blank pane.
         for row in 0..list_height {
             let y = win.y + 1 + row as u16;
             queue!(
@@ -4967,15 +4965,13 @@ impl Terminal {
             )?;
             write!(self.stdout, "\u{2502}")?; // │
 
-            // Reverse display: row 0 = least relevant, bottom row = best match
-            let list_idx = if row >= first_item_row {
-                // Map row to item index (reversed)
-                scroll_offset + (list_height - 1 - row)
-            } else {
-                usize::MAX // Empty row marker
-            };
-
-            if list_idx < total_items {
+            if let Some(list_idx) = finder_list_index_for_row(
+                editor.finder.mode,
+                row,
+                list_height,
+                total_items,
+                scroll_offset,
+            ) {
                 let item_idx = editor.finder.filtered[list_idx];
                 let item = &editor.finder.items[item_idx];
                 let is_selected = list_idx == editor.finder.selected;
@@ -5822,6 +5818,38 @@ impl Terminal {
     #[allow(dead_code)]
     pub fn poll_key(&self, timeout: std::time::Duration) -> anyhow::Result<bool> {
         Ok(event::poll(timeout)?)
+    }
+}
+
+fn finder_mode_top_aligns_results(mode: crate::finder::FinderMode) -> bool {
+    matches!(mode, crate::finder::FinderMode::GitChanges)
+}
+
+fn finder_list_index_for_row(
+    mode: crate::finder::FinderMode,
+    row: usize,
+    list_height: usize,
+    total_items: usize,
+    scroll_offset: usize,
+) -> Option<usize> {
+    if row >= list_height {
+        return None;
+    }
+
+    let visible_count = list_height.min(total_items.saturating_sub(scroll_offset));
+    if finder_mode_top_aligns_results(mode) {
+        if row < visible_count {
+            Some(scroll_offset + row)
+        } else {
+            None
+        }
+    } else {
+        let first_item_row = list_height.saturating_sub(visible_count);
+        if row >= first_item_row {
+            Some(scroll_offset + (list_height - 1 - row))
+        } else {
+            None
+        }
     }
 }
 
@@ -7762,36 +7790,49 @@ fn handle_finder_mode(editor: &mut Editor, key: KeyEvent) {
         }
 
         // Navigate up - works in both modes
-        // Note: List is rendered Telescope-style (best match at bottom)
-        // Visual UP means going toward higher indices (at visual top)
         (KeyModifiers::NONE, KeyCode::Up)
         | (KeyModifiers::CONTROL, KeyCode::Char('k'))
         | (KeyModifiers::CONTROL, KeyCode::Char('p')) => {
-            editor.finder.select_next(); // Visually goes UP
+            if finder_mode_top_aligns_results(editor.finder.mode) {
+                editor.finder.select_prev();
+            } else {
+                // Telescope-style modes render index 0 at the visual bottom.
+                editor.finder.select_next();
+            }
             adjust_scroll(editor);
             selection_changed = true;
         }
 
         // Navigate down - works in both modes
-        // Visual DOWN means going toward lower indices (at visual bottom)
         (KeyModifiers::NONE, KeyCode::Down)
         | (KeyModifiers::CONTROL, KeyCode::Char('j'))
         | (KeyModifiers::CONTROL, KeyCode::Char('n')) => {
-            editor.finder.select_prev(); // Visually goes DOWN
+            if finder_mode_top_aligns_results(editor.finder.mode) {
+                editor.finder.select_next();
+            } else {
+                // Telescope-style modes render index 0 at the visual bottom.
+                editor.finder.select_prev();
+            }
             adjust_scroll(editor);
             selection_changed = true;
         }
 
         // Normal mode specific: j/k for navigation
-        // Note: List is rendered Telescope-style (best match at bottom, index 0)
-        // So j (down visually) = decrement index, k (up visually) = increment index
         (KeyModifiers::NONE, KeyCode::Char('j')) if is_normal_mode => {
-            editor.finder.select_prev(); // Visually goes DOWN (toward index 0 at bottom)
+            if finder_mode_top_aligns_results(editor.finder.mode) {
+                editor.finder.select_next();
+            } else {
+                editor.finder.select_prev();
+            }
             adjust_scroll(editor);
             selection_changed = true;
         }
         (KeyModifiers::NONE, KeyCode::Char('k')) if is_normal_mode => {
-            editor.finder.select_next(); // Visually goes UP (toward higher indices at top)
+            if finder_mode_top_aligns_results(editor.finder.mode) {
+                editor.finder.select_prev();
+            } else {
+                editor.finder.select_next();
+            }
             adjust_scroll(editor);
             selection_changed = true;
         }
@@ -9195,8 +9236,8 @@ pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
 mod tests {
     use super::{
         apply_diagnostic_underline, diagnostic_at_col, diagnostic_underline_color, execute_command,
-        finder_preview_match_ranges, handle_insert_mode, handle_key, replace_completion_text,
-        Terminal,
+        finder_list_index_for_row, finder_preview_match_ranges, handle_insert_mode, handle_key,
+        replace_completion_text, Terminal,
     };
     use crate::commands::Command;
     use crate::config::{KeymapEntry, Settings};
@@ -9792,6 +9833,71 @@ mod tests {
         assert_eq!(editor.buffer().path.as_ref(), Some(&path));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn git_changes_results_render_from_top_of_short_list() {
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::GitChanges, 0, 10, 3, 0),
+            Some(0)
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::GitChanges, 1, 10, 3, 0),
+            Some(1)
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::GitChanges, 2, 10, 3, 0),
+            Some(2)
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::GitChanges, 3, 10, 3, 0),
+            None
+        );
+    }
+
+    #[test]
+    fn fuzzy_finder_results_keep_bottom_aligned_short_list() {
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::Files, 6, 10, 3, 0),
+            None
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::Files, 7, 10, 3, 0),
+            Some(2)
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::Files, 8, 10, 3, 0),
+            Some(1)
+        );
+        assert_eq!(
+            finder_list_index_for_row(crate::finder::FinderMode::Files, 9, 10, 3, 0),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn git_changes_navigation_moves_down_through_top_aligned_list() {
+        let mut editor = Editor::default();
+        editor.finder.open_git_changes(vec![
+            crate::finder::FinderItem::new("M alpha.rs".to_string(), PathBuf::from("alpha.rs"))
+                .with_git_status(crate::git::GitFileStatus::Modified),
+            crate::finder::FinderItem::new("M beta.rs".to_string(), PathBuf::from("beta.rs"))
+                .with_git_status(crate::git::GitFileStatus::Modified),
+            crate::finder::FinderItem::new("M gamma.rs".to_string(), PathBuf::from("gamma.rs"))
+                .with_git_status(crate::git::GitFileStatus::Modified),
+        ]);
+        editor.mode = Mode::Finder;
+        editor.finder.enter_normal_mode();
+
+        assert_eq!(editor.finder.selected, 0);
+        handle_key(&mut editor, key('j'));
+        assert_eq!(editor.finder.selected, 1);
+        handle_key(&mut editor, key('k'));
+        assert_eq!(editor.finder.selected, 0);
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(editor.finder.selected, 1);
+        handle_key(&mut editor, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(editor.finder.selected, 0);
     }
 
     #[test]
