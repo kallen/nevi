@@ -4888,6 +4888,7 @@ impl Terminal {
             crate::finder::FinderMode::Diagnostics => " Diagnostics ",
             crate::finder::FinderMode::Harpoon => " Harpoon ",
             crate::finder::FinderMode::Marks => " Marks ",
+            crate::finder::FinderMode::GitChanges => " Git Changes ",
             crate::finder::FinderMode::Terminals => " Terminals ",
         };
 
