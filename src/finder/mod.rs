@@ -139,6 +139,27 @@ pub struct MarkInfo {
     pub file_name: String,
 }
 
+fn git_changes_display_path(display: &str) -> (usize, &str) {
+    if let Some((prefix, path)) = display.split_once(' ') {
+        (prefix.chars().count() + 1, path)
+    } else {
+        (0, display)
+    }
+}
+
+fn offset_match_indices(
+    matcher: &mut FuzzyMatcher,
+    query: &str,
+    match_text: &str,
+    char_start: usize,
+) -> Vec<usize> {
+    matcher
+        .match_indices(query, match_text)
+        .into_iter()
+        .map(|idx| char_start + idx)
+        .collect()
+}
+
 /// Floating window dimensions
 #[derive(Debug, Clone, Copy)]
 pub struct FloatingWindow {
@@ -707,26 +728,28 @@ impl FuzzyFinder {
                     self.filtered = (0..self.items.len()).collect();
                 } else {
                     // Filter and sort by match score, and get match indices
+                    let mode = self.mode;
+                    let query = self.query.clone();
+                    let matcher = &mut self.matcher;
                     let mut scored: Vec<(usize, u32, Vec<usize>)> = self
                         .items
                         .iter()
                         .enumerate()
                         .filter_map(|(idx, item)| {
-                            let match_text = if self.mode == FinderMode::GitChanges {
-                                item.path.to_string_lossy()
+                            let (match_start, match_text) = if mode == FinderMode::GitChanges {
+                                git_changes_display_path(&item.display)
                             } else {
-                                std::borrow::Cow::Borrowed(item.display.as_str())
+                                (0, item.display.as_str())
                             };
-                            self.matcher
-                                .match_score(&self.query, &match_text)
-                                .map(|score| {
-                                    let indices = if self.mode == FinderMode::GitChanges {
-                                        Vec::new()
-                                    } else {
-                                        self.matcher.match_indices(&self.query, &item.display)
-                                    };
-                                    (idx, score, indices)
-                                })
+                            matcher.match_score(&query, match_text).map(|score| {
+                                let indices = offset_match_indices(
+                                    matcher,
+                                    &query,
+                                    match_text,
+                                    match_start,
+                                );
+                                (idx, score, indices)
+                            })
                         })
                         .collect();
 
@@ -1170,6 +1193,30 @@ mod tests {
             finder.selected_item().map(|item| item.path.as_path()),
             Some(Path::new("README.md"))
         );
+    }
+
+    #[test]
+    fn git_changes_finder_highlights_path_matches_in_display_text() {
+        let mut finder = FuzzyFinder::new();
+        finder.open_git_changes(vec![
+            FinderItem::new(
+                "M src/lib/types.ts".to_string(),
+                PathBuf::from("/repo/src/lib/types.ts"),
+            )
+            .with_git_status(crate::git::GitFileStatus::Modified),
+        ]);
+
+        for ch in "type".chars() {
+            finder.insert_char(ch);
+        }
+
+        let item = finder.selected_item().expect("matching item");
+        let highlighted: String = item
+            .match_indices
+            .iter()
+            .map(|&idx| item.display.chars().nth(idx).expect("matched char"))
+            .collect();
+        assert_eq!(highlighted, "type");
     }
 
     #[test]
