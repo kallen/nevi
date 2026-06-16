@@ -4,6 +4,8 @@ A fast, Neovim-inspired terminal editor written in Rust.
 
 *Your vim muscle memory, without the configuration overhead.*
 
+![Nevi demo — fuzzy file finder with preview, vim motions, Harpoon quick-switch, live grep, and live theme switching](nevi-demo.gif)
+
 ## Why Nevi?
 
 **The Problem:**
