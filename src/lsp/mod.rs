@@ -13,6 +13,7 @@ pub mod types;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use lsp_types::Url;
 
@@ -86,11 +87,25 @@ impl LspManager {
         self.status == LspStatus::Ready
     }
 
-    /// Shutdown the LSP manager
+    /// Shutdown the LSP manager.
+    ///
+    /// Sends a graceful shutdown, then waits only *briefly* for the worker thread to
+    /// exit. The worker can be blocked writing to a busy server's stdin, and an
+    /// unbounded `join()` here would hang the editor on quit (this is why `:wq` could
+    /// freeze and leave orphaned `nevi` processes). We bound the wait and move on:
+    /// - common case: the worker exits in ms and its `LspClient` drop kills the server;
+    /// - stuck case: we give up quickly and let the process exit — the server
+    ///   self-terminates because we passed our processId in `initialize`.
     pub fn shutdown(&mut self) {
         let _ = self.request_tx.send(LspRequest::Shutdown);
         if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
+            let (done_tx, done_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let _ = handle.join();
+                let _ = done_tx.send(());
+            });
+            // Bounded: graceful shutdown is fast when the server isn't wedged.
+            let _ = done_rx.recv_timeout(Duration::from_millis(300));
         }
         self.status = LspStatus::Stopped;
     }

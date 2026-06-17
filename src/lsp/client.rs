@@ -176,6 +176,11 @@ fn client_capabilities() -> ClientCapabilities {
             work_done_progress: Some(true),
             ..Default::default()
         }),
+        // Opt in to rust-analyzer's experimental/serverStatus notification so we
+        // know when analysis is actually quiescent (vs. just initialized).
+        experimental: Some(serde_json::json!({
+            "serverStatusNotification": true,
+        })),
         ..Default::default()
     }
 }
@@ -1211,6 +1216,18 @@ fn handle_notification(method: &str, params: Option<Value>) -> Option<LspNotific
                 done: kind == "end",
             })
         }
+        "experimental/serverStatus" => {
+            let params = params?;
+            let quiescent = params
+                .get("quiescent")
+                .and_then(|quiescent| quiescent.as_bool())
+                .unwrap_or(false);
+            let message = params
+                .get("message")
+                .and_then(|message| message.as_str())
+                .map(|message| message.to_string());
+            Some(LspNotification::ServerStatus { quiescent, message })
+        }
         _ => None,
     }
 }
@@ -1913,6 +1930,44 @@ mod tests {
                 assert!(!done);
             }
             other => panic!("expected progress notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn client_capabilities_advertise_server_status_notification() {
+        let capabilities = client_capabilities();
+
+        let experimental = capabilities
+            .experimental
+            .expect("experimental capabilities");
+        assert_eq!(
+            experimental
+                .get("serverStatusNotification")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn server_status_notifications_are_parsed() {
+        let quiescent = handle_notification(
+            "experimental/serverStatus",
+            Some(json!({ "quiescent": true, "health": "ok" })),
+        )
+        .expect("server status notification");
+        match quiescent {
+            LspNotification::ServerStatus { quiescent, .. } => assert!(quiescent),
+            other => panic!("expected server status notification, got {other:?}"),
+        }
+
+        let indexing = handle_notification(
+            "experimental/serverStatus",
+            Some(json!({ "quiescent": false })),
+        )
+        .expect("server status notification");
+        match indexing {
+            LspNotification::ServerStatus { quiescent, .. } => assert!(!quiescent),
+            other => panic!("expected server status notification, got {other:?}"),
         }
     }
 }

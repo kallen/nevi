@@ -1251,6 +1251,16 @@ fn main() -> anyhow::Result<()> {
                             );
                             needs_redraw = true;
                         }
+                        LspNotification::ServerStatus { .. } => {
+                            // Analysis readiness changed (indexing <-> quiescent);
+                            // refresh the statusline so it stops claiming "ready"
+                            // while the server is still indexing.
+                            let current_path = editor.buffer().path.clone();
+                            editor.set_lsp_status(
+                                mlsp.status(current_path.as_ref().map(|p| p.as_path())),
+                            );
+                            needs_redraw = true;
+                        }
                         LspNotification::Formatting {
                             edits,
                             request_uri,

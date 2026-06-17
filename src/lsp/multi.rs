@@ -70,6 +70,11 @@ impl LanguageId {
 struct LspInstance {
     manager: LspManager,
     ready: bool,
+    /// Analysis readiness reported via `experimental/serverStatus`:
+    /// `None`  — server doesn't report status; treat as ready once initialized.
+    /// `Some(false)` — initialized but still indexing/analyzing.
+    /// `Some(true)`  — quiescent; requests can be answered reliably.
+    analysis_ready: Option<bool>,
     last_error: Option<String>,
     progress: Option<LspProgressState>,
     current_file: Option<PathBuf>,
@@ -277,6 +282,17 @@ impl MultiLspManager {
         now.duration_since(started_at) >= PROGRESS_DISPLAY_DELAY
     }
 
+    /// Statusline label once the handshake is done: "ready" when the server is
+    /// quiescent, "indexing…" while it is still analyzing (rust-analyzer reports
+    /// this via `experimental/serverStatus`).
+    fn lifecycle_label(server_name: &str, lang: LanguageId, indexing: bool) -> String {
+        if indexing {
+            format!("LSP: {} indexing… ({})", server_name, lang.as_lsp_id())
+        } else {
+            format!("LSP: {} ready ({})", server_name, lang.as_lsp_id())
+        }
+    }
+
     /// Create a new multi-LSP manager with the given configurations
     pub fn new(
         workspace_root: PathBuf,
@@ -351,6 +367,7 @@ impl MultiLspManager {
                     LspInstance {
                         manager,
                         ready: false,
+                        analysis_ready: None,
                         last_error: None,
                         progress: None,
                         current_file: None,
@@ -420,6 +437,13 @@ impl MultiLspManager {
                 if let LspNotification::Initialized = &notification {
                     instance.ready = true;
                     instance.last_error = None;
+                    // Handshake done, but analysis hasn't started yet. Wait for a
+                    // serverStatus notification (if the server sends them) before
+                    // reporting "ready" rather than "indexing".
+                    instance.analysis_ready = None;
+                }
+                if let LspNotification::ServerStatus { quiescent, .. } = &notification {
+                    instance.analysis_ready = Some(*quiescent);
                 }
                 if let LspNotification::Progress {
                     title,
@@ -447,6 +471,7 @@ impl MultiLspManager {
                     // Keep the server ready unless we detect a transport/startup failure.
                     if Self::is_fatal_error(message) {
                         instance.ready = false;
+                        instance.analysis_ready = None;
                         let command = self
                             .configs
                             .get(&lang)
@@ -720,6 +745,10 @@ impl MultiLspManager {
                         .map(|c| c.effective_command())
                         .unwrap_or("unknown");
 
+                    // `ready` (handshake) gates requests; `analysis_ready == Some(false)`
+                    // means the server is up but still indexing, so don't claim "ready".
+                    let indexing = instance.analysis_ready == Some(false);
+
                     if let Some(error) = &instance.last_error {
                         return format!("LSP: {error}");
                     } else if let Some(progress) = &instance.progress {
@@ -732,11 +761,11 @@ impl MultiLspManager {
                             );
                         }
                     } else if instance.ready {
-                        return format!("LSP: {} ready ({})", server_name, lang.as_lsp_id());
+                        return Self::lifecycle_label(server_name, lang, indexing);
                     }
 
                     if instance.ready {
-                        return format!("LSP: {} ready ({})", server_name, lang.as_lsp_id());
+                        return Self::lifecycle_label(server_name, lang, indexing);
                     }
 
                     return format!("LSP: starting {} ({})...", server_name, lang.as_lsp_id());
@@ -963,5 +992,16 @@ mod tests {
             now - PROGRESS_DISPLAY_DELAY,
             now
         ));
+    }
+
+    #[test]
+    fn lifecycle_label_distinguishes_indexing_from_ready() {
+        let ready = MultiLspManager::lifecycle_label("rust-analyzer", LanguageId::Rust, false);
+        assert!(ready.contains("ready"), "got: {ready}");
+        assert!(!ready.contains("indexing"), "got: {ready}");
+
+        let indexing = MultiLspManager::lifecycle_label("rust-analyzer", LanguageId::Rust, true);
+        assert!(indexing.contains("indexing"), "got: {indexing}");
+        assert!(!indexing.contains("ready"), "got: {indexing}");
     }
 }

@@ -232,6 +232,14 @@ pub enum LspNotification {
     /// Server status update
     Status { message: String },
 
+    /// Analysis-readiness status (e.g. rust-analyzer `experimental/serverStatus`).
+    /// `quiescent` is false while the server is still indexing/analyzing and true
+    /// once it can answer requests reliably.
+    ServerStatus {
+        quiescent: bool,
+        message: Option<String>,
+    },
+
     /// Formatting result with text edits to apply
     Formatting {
         edits: Vec<TextEdit>,
