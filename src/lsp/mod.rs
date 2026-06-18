@@ -9,16 +9,20 @@
 mod client;
 pub mod multi;
 pub mod types;
+mod watched_files;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use lsp_types::Url;
 
 pub use client::LspClient;
 pub use multi::{LanguageId, MultiLspManager};
 pub use types::*;
+
+const READER_JOIN_TIMEOUT: Duration = Duration::from_millis(300);
 
 /// Manager for the LSP client thread
 pub struct LspManager {
@@ -86,11 +90,25 @@ impl LspManager {
         self.status == LspStatus::Ready
     }
 
-    /// Shutdown the LSP manager
+    /// Shutdown the LSP manager.
+    ///
+    /// Sends a graceful shutdown, then waits only *briefly* for the worker thread to
+    /// exit. The worker can be blocked writing to a busy server's stdin, and an
+    /// unbounded `join()` here would hang the editor on quit (this is why `:wq` could
+    /// freeze and leave orphaned `nevi` processes). We bound the wait and move on:
+    /// - common case: the worker exits in ms and its `LspClient` drop kills the server;
+    /// - stuck case: we give up quickly and let the process exit — the server
+    ///   self-terminates because we passed our processId in `initialize`.
     pub fn shutdown(&mut self) {
         let _ = self.request_tx.send(LspRequest::Shutdown);
         if let Some(handle) = self.thread_handle.take() {
-            let _ = handle.join();
+            let (done_tx, done_rx) = mpsc::channel();
+            thread::spawn(move || {
+                let _ = handle.join();
+                let _ = done_tx.send(());
+            });
+            // Bounded: graceful shutdown is fast when the server isn't wedged.
+            let _ = done_rx.recv_timeout(Duration::from_millis(300));
         }
         self.status = LspStatus::Stopped;
     }
@@ -260,6 +278,15 @@ impl Drop for LspManager {
     }
 }
 
+fn join_thread_with_timeout(handle: JoinHandle<()>, timeout: Duration) -> bool {
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = handle.join();
+        let _ = done_tx.send(());
+    });
+    done_rx.recv_timeout(timeout).is_ok()
+}
+
 /// Run the LSP client thread
 fn run_lsp_thread(
     command: &str,
@@ -279,6 +306,21 @@ fn run_lsp_thread(
         }
     };
 
+    let mut watched_files = match watched_files::WatchedFilesHandle::start(
+        root_path.clone(),
+        stdin.clone(),
+        notification_tx.clone(),
+    ) {
+        Ok(handle) => handle,
+        Err(error) => {
+            let _ = notification_tx.send(LspNotification::Error {
+                message: format!("Failed to start LSP file watcher: {error}"),
+            });
+            return;
+        }
+    };
+    let watcher_tx = watched_files.command_sender();
+
     // Start stdout reader thread
     let stdout = match client.take_stdout() {
         Some(s) => s,
@@ -295,7 +337,7 @@ fn run_lsp_thread(
     // so responses are guaranteed to find their request kinds
     let notification_tx_clone = notification_tx.clone();
     let reader_handle = thread::spawn(move || {
-        client::read_messages(stdout, notification_tx_clone, pending, stdin);
+        client::read_messages(stdout, notification_tx_clone, pending, stdin, watcher_tx);
     });
 
     // Spawn stderr reader thread to capture LSP server errors
@@ -491,8 +533,10 @@ fn run_lsp_thread(
         }
     }
 
-    // Wait for reader thread to finish (it will exit when stdout closes)
-    let _ = reader_handle.join();
+    watched_files.shutdown();
+
+    // Bounded: stdout readers can wedge if the server ignores shutdown.
+    let _ = join_thread_with_timeout(reader_handle, READER_JOIN_TIMEOUT);
 }
 
 /// Convert a file path to a file:// URI
@@ -550,8 +594,24 @@ fn detect_language(path: &PathBuf) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::detect_language;
+    use super::{detect_language, join_thread_with_timeout};
     use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn reader_thread_join_helper_returns_without_waiting_forever() {
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = thread::spawn(move || {
+            let _ = release_rx.recv();
+        });
+
+        let started = Instant::now();
+        assert!(!join_thread_with_timeout(handle, Duration::from_millis(20)));
+        assert!(started.elapsed() < Duration::from_millis(200));
+        drop(release_tx);
+    }
 
     #[test]
     fn detect_language_maps_all_routed_lsp_extensions() {

@@ -6,8 +6,9 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use lsp_types::{
@@ -23,11 +24,21 @@ use super::types::{
     CodeActionItem, CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity, Location,
     LspNotification, ParameterInfo, RequestKind, SignatureHelpResult, SignatureInfo, TextEdit,
 };
+#[cfg(test)]
+use super::watched_files::WATCHED_FILES_METHOD;
+use super::watched_files::{
+    parse_register_params, parse_unregister_params, WatcherCommand, WatcherRequestError,
+};
 
 /// Shared pending requests map - maps request ID to request kind
 /// This is shared between the request sender and response reader threads
 pub type PendingRequests = Arc<Mutex<HashMap<u64, RequestKind>>>;
 pub type SharedStdin = Arc<Mutex<ChildStdin>>;
+
+#[cfg(not(test))]
+const WATCHER_COMMAND_REPLY_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const WATCHER_COMMAND_REPLY_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// JSON-RPC request message
 #[derive(Debug, Serialize)]
@@ -172,10 +183,22 @@ fn client_capabilities() -> ClientCapabilities {
             }),
             ..Default::default()
         }),
+        workspace: Some(lsp_types::WorkspaceClientCapabilities {
+            did_change_watched_files: Some(lsp_types::DidChangeWatchedFilesClientCapabilities {
+                dynamic_registration: Some(true),
+                relative_pattern_support: Some(true),
+            }),
+            ..Default::default()
+        }),
         window: Some(lsp_types::WindowClientCapabilities {
             work_done_progress: Some(true),
             ..Default::default()
         }),
+        // Opt in to rust-analyzer's experimental/serverStatus notification so we
+        // know when analysis is actually quiescent (vs. just initialized).
+        experimental: Some(serde_json::json!({
+            "serverStatusNotification": true,
+        })),
         ..Default::default()
     }
 }
@@ -715,6 +738,7 @@ pub fn read_messages(
     tx: Sender<LspNotification>,
     pending: PendingRequests,
     stdin: SharedStdin,
+    watcher_tx: Sender<WatcherCommand>,
 ) {
     let mut reader = BufReader::new(stdout);
     let mut headers = String::new();
@@ -764,7 +788,8 @@ pub fn read_messages(
         };
 
         // Handle the message using the shared pending map
-        let (notification, response_to_server) = handle_message(response, &pending);
+        let (notification, response_to_server) =
+            handle_message(response, &pending, Some(&watcher_tx));
 
         // Send response to server if needed (for server-initiated requests)
         if let Some(response_msg) = response_to_server {
@@ -798,6 +823,7 @@ pub fn read_messages(
 fn handle_message(
     msg: JsonRpcResponse,
     pending: &PendingRequests,
+    watcher_tx: Option<&Sender<WatcherCommand>>,
 ) -> (Option<LspNotification>, Option<String>) {
     // Check if it's a notification (no id) - these are server-initiated notifications
     if msg.id.is_none() {
@@ -812,7 +838,7 @@ fn handle_message(
     // Check if it's a server-initiated REQUEST (has both id AND method)
     // These require us to send a response back
     if let Some(method) = &msg.method {
-        let response = handle_server_request(id, method, msg.params);
+        let response = handle_server_request(id, method, msg.params, watcher_tx);
         return (None, response);
     }
 
@@ -991,7 +1017,54 @@ fn handle_message(
 
 /// Handle a server-initiated request (server is asking us something)
 /// Returns a JSON-RPC response string to send back
-fn handle_server_request(id: JsonRpcId, method: &str, params: Option<Value>) -> Option<String> {
+fn success_response(id: JsonRpcId) -> Option<String> {
+    build_response(JsonRpcResponseOut {
+        jsonrpc: "2.0",
+        id,
+        result: Some(Value::Null),
+        error: None,
+    })
+}
+
+fn error_response(id: JsonRpcId, code: i64, message: impl Into<String>) -> Option<String> {
+    build_response(JsonRpcResponseOut {
+        jsonrpc: "2.0",
+        id,
+        result: None,
+        error: Some(JsonRpcErrorOut {
+            code,
+            message: message.into(),
+        }),
+    })
+}
+
+fn send_watcher_command(
+    watcher_tx: Option<&Sender<WatcherCommand>>,
+    build: impl FnOnce(SyncSender<std::result::Result<(), WatcherRequestError>>) -> WatcherCommand,
+) -> std::result::Result<(), WatcherRequestError> {
+    let watcher_tx = watcher_tx
+        .ok_or_else(|| WatcherRequestError::Setup("watched-file worker unavailable".to_string()))?;
+    let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+    watcher_tx.send(build(reply_tx)).map_err(|error| {
+        WatcherRequestError::Setup(format!("failed to send watched-file command: {error}"))
+    })?;
+    match reply_rx.recv_timeout(WATCHER_COMMAND_REPLY_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(WatcherRequestError::Setup(
+            "watched-file worker reply timed out".to_string(),
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(WatcherRequestError::Setup(
+            "watched-file worker reply channel closed".to_string(),
+        )),
+    }
+}
+
+fn handle_server_request(
+    id: JsonRpcId,
+    method: &str,
+    params: Option<Value>,
+    watcher_tx: Option<&Sender<WatcherCommand>>,
+) -> Option<String> {
     match method {
         "workspace/configuration" => {
             // Server is asking for configuration
@@ -1014,14 +1087,29 @@ fn handle_server_request(id: JsonRpcId, method: &str, params: Option<Value>) -> 
             })
         }
         "client/registerCapability" => {
-            // Server wants to register dynamic capabilities
-            // Acknowledge with null result
-            build_response(JsonRpcResponseOut {
-                jsonrpc: "2.0",
-                id,
-                result: Some(Value::Null),
-                error: None,
-            })
+            let registrations = match parse_register_params(params) {
+                Ok(registrations) => registrations,
+                Err(WatcherRequestError::InvalidParams(message)) => {
+                    return error_response(id, -32602, message);
+                }
+                Err(WatcherRequestError::Setup(message)) => {
+                    return error_response(id, -32603, message);
+                }
+            };
+            if registrations.is_empty() {
+                return success_response(id);
+            }
+
+            match send_watcher_command(watcher_tx, |reply| WatcherCommand::Register {
+                registrations,
+                reply,
+            }) {
+                Ok(()) => success_response(id),
+                Err(WatcherRequestError::InvalidParams(message)) => {
+                    error_response(id, -32602, message)
+                }
+                Err(WatcherRequestError::Setup(message)) => error_response(id, -32603, message),
+            }
         }
         "window/workDoneProgress/create" => {
             // Server wants to create a progress indicator
@@ -1052,13 +1140,29 @@ fn handle_server_request(id: JsonRpcId, method: &str, params: Option<Value>) -> 
             })
         }
         "client/unregisterCapability" => {
-            // Accept unregister requests
-            build_response(JsonRpcResponseOut {
-                jsonrpc: "2.0",
-                id,
-                result: Some(Value::Null),
-                error: None,
-            })
+            let registration_ids = match parse_unregister_params(params) {
+                Ok(registration_ids) => registration_ids,
+                Err(WatcherRequestError::InvalidParams(message)) => {
+                    return error_response(id, -32602, message);
+                }
+                Err(WatcherRequestError::Setup(message)) => {
+                    return error_response(id, -32603, message);
+                }
+            };
+            if registration_ids.is_empty() {
+                return success_response(id);
+            }
+
+            match send_watcher_command(watcher_tx, |reply| WatcherCommand::Unregister {
+                registration_ids,
+                reply,
+            }) {
+                Ok(()) => success_response(id),
+                Err(WatcherRequestError::InvalidParams(message)) => {
+                    error_response(id, -32602, message)
+                }
+                Err(WatcherRequestError::Setup(message)) => error_response(id, -32603, message),
+            }
         }
         "workspace/applyEdit" => {
             // We don't support workspace edits yet; explicitly reject.
@@ -1210,6 +1314,18 @@ fn handle_notification(method: &str, params: Option<Value>) -> Option<LspNotific
                 percentage,
                 done: kind == "end",
             })
+        }
+        "experimental/serverStatus" => {
+            let params = params?;
+            let quiescent = params
+                .get("quiescent")
+                .and_then(|quiescent| quiescent.as_bool())
+                .unwrap_or(false);
+            let message = params
+                .get("message")
+                .and_then(|message| message.as_str())
+                .map(|message| message.to_string());
+            Some(LspNotification::ServerStatus { quiescent, message })
         }
         _ => None,
     }
@@ -1821,6 +1937,36 @@ fn handle_completion_resolve_response(
 mod tests {
     use super::*;
     use crate::lsp::types::{DiagnosticCode, DiagnosticSeverity};
+    use lsp_types::Url;
+    use std::path::Path;
+    use std::thread;
+    use std::time::Duration;
+
+    fn watched_file_register_params(root: &Path) -> Option<Value> {
+        Some(json!({
+            "registrations": [{
+                "id": "rust-files",
+                "method": WATCHED_FILES_METHOD,
+                "registerOptions": {
+                    "watchers": [{
+                        "globPattern": {
+                            "baseUri": Url::from_file_path(root).unwrap(),
+                            "pattern": "**/*.rs"
+                        }
+                    }]
+                }
+            }]
+        }))
+    }
+
+    fn watched_file_unregister_params() -> Option<Value> {
+        Some(json!({
+            "unregisterations": [{
+                "id": "rust-files",
+                "method": WATCHED_FILES_METHOD
+            }]
+        }))
+    }
 
     #[test]
     fn code_action_diagnostic_conversion_preserves_multiline_end_line() {
@@ -1885,6 +2031,214 @@ mod tests {
     }
 
     #[test]
+    fn client_capabilities_delegate_file_watching_to_the_client() {
+        let capabilities = client_capabilities();
+
+        let watched_files = capabilities
+            .workspace
+            .and_then(|workspace| workspace.did_change_watched_files)
+            .expect("watched-file capabilities");
+
+        assert_eq!(watched_files.dynamic_registration, Some(true));
+        assert_eq!(watched_files.relative_pattern_support, Some(true));
+    }
+
+    #[test]
+    fn watched_file_registration_is_forwarded_before_success_response() {
+        let root = std::env::temp_dir();
+        let (command_tx, command_rx) = mpsc::channel();
+        let worker = thread::spawn(move || match command_rx.recv().expect("watcher command") {
+            WatcherCommand::Register {
+                registrations,
+                reply,
+            } => {
+                assert_eq!(registrations.len(), 1);
+                assert_eq!(registrations[0].id, "rust-files");
+                reply.send(Ok(())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        });
+
+        let response = handle_server_request(
+            JsonRpcId::Num(7),
+            "client/registerCapability",
+            watched_file_register_params(&root),
+            Some(&command_tx),
+        )
+        .expect("response");
+
+        worker.join().unwrap();
+        assert!(response.contains("\"result\":null"));
+    }
+
+    #[test]
+    fn watched_file_unregistration_is_forwarded_before_success_response() {
+        let (command_tx, command_rx) = mpsc::channel();
+        let worker = thread::spawn(move || match command_rx.recv().expect("watcher command") {
+            WatcherCommand::Unregister {
+                registration_ids,
+                reply,
+            } => {
+                assert_eq!(registration_ids, vec!["rust-files".to_string()]);
+                reply.send(Ok(())).unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        });
+
+        let response = handle_server_request(
+            JsonRpcId::Num(9),
+            "client/unregisterCapability",
+            watched_file_unregister_params(),
+            Some(&command_tx),
+        )
+        .expect("response");
+
+        worker.join().unwrap();
+        assert!(response.contains("\"result\":null"));
+    }
+
+    #[test]
+    fn unrelated_dynamic_registration_requests_do_not_touch_watcher() {
+        let (command_tx, command_rx) = mpsc::channel();
+
+        let register_response = handle_server_request(
+            JsonRpcId::Num(10),
+            "client/registerCapability",
+            Some(json!({
+                "registrations": [{
+                    "id": "configuration",
+                    "method": "workspace/didChangeConfiguration"
+                }]
+            })),
+            Some(&command_tx),
+        )
+        .expect("register response");
+
+        let unregister_response = handle_server_request(
+            JsonRpcId::Num(11),
+            "client/unregisterCapability",
+            Some(json!({
+                "unregisterations": [{
+                    "id": "configuration",
+                    "method": "workspace/didChangeConfiguration"
+                }]
+            })),
+            Some(&command_tx),
+        )
+        .expect("unregister response");
+
+        assert!(register_response.contains("\"result\":null"));
+        assert!(unregister_response.contains("\"result\":null"));
+        assert!(command_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn watcher_setup_error_returns_internal_error() {
+        let root = std::env::temp_dir();
+        let (command_tx, command_rx) = mpsc::channel();
+        let worker = thread::spawn(move || match command_rx.recv().expect("watcher command") {
+            WatcherCommand::Register { reply, .. } => {
+                reply
+                    .send(Err(WatcherRequestError::Setup(
+                        "watch setup failed".to_string(),
+                    )))
+                    .unwrap();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        });
+
+        let response = handle_server_request(
+            JsonRpcId::Num(12),
+            "client/registerCapability",
+            watched_file_register_params(&root),
+            Some(&command_tx),
+        )
+        .expect("response");
+
+        worker.join().unwrap();
+        assert!(response.contains("\"code\":-32603"));
+    }
+
+    #[test]
+    fn missing_or_closed_watcher_sender_returns_internal_error() {
+        let root = std::env::temp_dir();
+        let missing_response = handle_server_request(
+            JsonRpcId::Num(13),
+            "client/registerCapability",
+            watched_file_register_params(&root),
+            None,
+        )
+        .expect("missing watcher response");
+
+        let (command_tx, command_rx) = mpsc::channel();
+        drop(command_rx);
+        let closed_response = handle_server_request(
+            JsonRpcId::Num(14),
+            "client/registerCapability",
+            watched_file_register_params(&root),
+            Some(&command_tx),
+        )
+        .expect("closed watcher response");
+
+        assert!(missing_response.contains("\"code\":-32603"));
+        assert!(closed_response.contains("\"code\":-32603"));
+    }
+
+    #[test]
+    fn watcher_reply_timeout_returns_internal_error() {
+        let root = std::env::temp_dir();
+        let (command_tx, command_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker = thread::spawn(move || match command_rx.recv().expect("watcher command") {
+            WatcherCommand::Register { reply, .. } => {
+                let _reply = reply;
+                let _ = release_rx.recv();
+            }
+            other => panic!("unexpected command: {other:?}"),
+        });
+        let (done_tx, done_rx) = mpsc::channel();
+        let request_tx = command_tx.clone();
+        let requester = thread::spawn(move || {
+            let response = handle_server_request(
+                JsonRpcId::Num(15),
+                "client/registerCapability",
+                watched_file_register_params(&root),
+                Some(&request_tx),
+            )
+            .expect("response");
+            done_tx.send(response).unwrap();
+        });
+
+        let result = done_rx.recv_timeout(Duration::from_millis(200));
+        let _ = release_tx.send(());
+        worker.join().unwrap();
+        requester.join().unwrap();
+        let response = result.expect("watcher routing should time out");
+
+        assert!(response.contains("\"code\":-32603"));
+    }
+
+    #[test]
+    fn malformed_watched_file_registration_returns_invalid_params() {
+        let (command_tx, _command_rx) = mpsc::channel();
+        let response = handle_server_request(
+            JsonRpcId::Num(8),
+            "client/registerCapability",
+            Some(json!({
+                "registrations": [{
+                    "id": "broken",
+                    "method": WATCHED_FILES_METHOD,
+                    "registerOptions": { "watchers": "not-an-array" }
+                }]
+            })),
+            Some(&command_tx),
+        )
+        .expect("response");
+
+        assert!(response.contains("\"code\":-32602"));
+    }
+
+    #[test]
     fn progress_notifications_are_parsed_for_status_display() {
         let notification = handle_notification(
             "$/progress",
@@ -1913,6 +2267,44 @@ mod tests {
                 assert!(!done);
             }
             other => panic!("expected progress notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn client_capabilities_advertise_server_status_notification() {
+        let capabilities = client_capabilities();
+
+        let experimental = capabilities
+            .experimental
+            .expect("experimental capabilities");
+        assert_eq!(
+            experimental
+                .get("serverStatusNotification")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn server_status_notifications_are_parsed() {
+        let quiescent = handle_notification(
+            "experimental/serverStatus",
+            Some(json!({ "quiescent": true, "health": "ok" })),
+        )
+        .expect("server status notification");
+        match quiescent {
+            LspNotification::ServerStatus { quiescent, .. } => assert!(quiescent),
+            other => panic!("expected server status notification, got {other:?}"),
+        }
+
+        let indexing = handle_notification(
+            "experimental/serverStatus",
+            Some(json!({ "quiescent": false })),
+        )
+        .expect("server status notification");
+        match indexing {
+            LspNotification::ServerStatus { quiescent, .. } => assert!(!quiescent),
+            other => panic!("expected server status notification, got {other:?}"),
         }
     }
 }
