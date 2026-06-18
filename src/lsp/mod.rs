@@ -9,6 +9,7 @@
 mod client;
 pub mod multi;
 pub mod types;
+mod watched_files;
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
