@@ -172,15 +172,6 @@ fn client_capabilities() -> ClientCapabilities {
             }),
             ..Default::default()
         }),
-        workspace: Some(lsp_types::WorkspaceClientCapabilities {
-            did_change_watched_files: Some(
-                lsp_types::DidChangeWatchedFilesClientCapabilities {
-                    dynamic_registration: Some(true),
-                    relative_pattern_support: Some(true),
-                },
-            ),
-            ..Default::default()
-        }),
         window: Some(lsp_types::WindowClientCapabilities {
             work_done_progress: Some(true),
             ..Default::default()
@@ -1908,19 +1899,6 @@ mod tests {
                 .and_then(|window| window.work_done_progress),
             Some(true)
         );
-    }
-
-    #[test]
-    fn client_capabilities_delegate_file_watching_to_the_client() {
-        let capabilities = client_capabilities();
-
-        let watched_files = capabilities
-            .workspace
-            .and_then(|workspace| workspace.did_change_watched_files)
-            .expect("watched-file capabilities");
-
-        assert_eq!(watched_files.dynamic_registration, Some(true));
-        assert_eq!(watched_files.relative_pattern_support, Some(true));
     }
 
     #[test]
