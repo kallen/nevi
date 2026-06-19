@@ -11,6 +11,7 @@ use nevi::copilot::{
 use nevi::editor::{CopilotAction, CopilotGhostText, LspAction};
 use nevi::lsp;
 use nevi::terminal::{execute_leader_action, handle_key, EditorEvent};
+
 use nevi::{
     editor::RegisterContent,
     floating_terminal::{

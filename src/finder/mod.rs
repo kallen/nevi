@@ -1,10 +1,12 @@
 mod file_picker;
 mod grep;
 mod matcher;
+mod keybinds;
 
 pub use file_picker::FilePicker;
 pub use grep::GrepSearcher;
 pub use matcher::FuzzyMatcher;
+pub use keybinds::keymap_finder_items;
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -35,6 +37,7 @@ pub enum FinderMode {
     Marks,
     GitChanges,
     Terminals,
+    Keymaps,
 }
 
 /// Input mode for the fuzzy finder (like vim modes)
@@ -422,6 +425,22 @@ impl FuzzyFinder {
         self.cancel_grep_search();
 
         self.items = terminal_items;
+        self.filtered = (0..self.items.len()).collect();
+        self.populated = true;
+    }
+
+    /// Open the finder in keymaps (cheatsheet) mode — read-only, no preview pane.
+    pub fn open_keymaps(&mut self, items: Vec<FinderItem>) {
+        self.mode = FinderMode::Keymaps;
+        self.input_mode = FinderInputMode::Insert;
+        self.query.clear();
+        self.cursor = 0;
+        self.selected = 0;
+        self.scroll_offset = 0;
+        self.clear_preview_cache();
+        self.cancel_grep_search();
+
+        self.items = items;
         self.filtered = (0..self.items.len()).collect();
         self.populated = true;
     }
@@ -1153,6 +1172,33 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("async grep search did not finish");
+    }
+
+    #[test]
+    fn open_keymaps_sets_mode_and_loads_items() {
+        let mut finder = FuzzyFinder::new();
+        finder.open_keymaps(vec![
+            FinderItem::new("n       h                  Move cursor left".to_string(), PathBuf::new()),
+            FinderItem::new("leader  <leader>ff         Find files".to_string(), PathBuf::new()),
+        ]);
+
+        assert_eq!(finder.mode, FinderMode::Keymaps);
+        assert_eq!(finder.items.len(), 2);
+        assert!(finder.populated);
+        assert!(!finder.mode_supports_preview(), "keymaps mode has no preview pane");
+    }
+
+    #[test]
+    fn keymap_items_are_inert() {
+        let items = crate::finder::keymap_finder_items();
+        assert!(!items.is_empty(), "expected some implemented keybindings");
+        for item in &items {
+            assert_eq!(item.path, std::path::PathBuf::new(), "keymap items must have no path");
+            assert!(item.buffer_idx.is_none());
+            assert!(item.terminal_session_position.is_none());
+            assert!(item.git_status.is_none());
+            assert!(item.line.is_none());
+        }
     }
 
     #[test]

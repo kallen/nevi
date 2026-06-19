@@ -6907,6 +6907,13 @@ impl Editor {
         self.mode = Mode::Finder;
     }
 
+    /// Open the fuzzy finder in keymaps cheatsheet mode (read-only).
+    pub fn open_keymaps_picker(&mut self) {
+        let items = crate::finder::keymap_finder_items();
+        self.finder.open_keymaps(items);
+        self.mode = Mode::Finder;
+    }
+
     /// Open the fuzzy finder in marks mode
     pub fn open_finder_marks(&mut self) {
         use crate::finder::MarkInfo;

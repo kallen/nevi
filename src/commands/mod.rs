@@ -134,6 +134,8 @@ pub enum Command {
     Theme(String),
     /// :Themes - Open theme picker
     Themes,
+    /// :Keymaps - Open searchable keybinding cheatsheet
+    Keymaps,
     /// :marks - Show all marks
     Marks,
     /// :delmarks {marks} - Delete specified marks
@@ -565,6 +567,12 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         takes_args: false,
     },
     CommandSpec {
+        command: "Keymaps",
+        aliases: &["keymaps", "keys"],
+        description: "Open searchable keybinding cheatsheet",
+        takes_args: false,
+    },
+    CommandSpec {
         command: "marks",
         aliases: &[],
         description: "Show all marks",
@@ -936,6 +944,7 @@ pub fn parse_command(input: &str) -> Command {
             }
         }
         "Themes" | "themes" => Command::Themes,
+        "Keymaps" | "keymaps" | "keys" => Command::Keymaps,
 
         // Marks commands
         "marks" => Command::Marks,
@@ -1505,6 +1514,13 @@ mod tests {
         assert!(matches!(parse_command("GitChanges"), Command::GitChanges));
         assert!(matches!(parse_command("changes"), Command::GitChanges));
         assert!(matches!(parse_command("gc"), Command::GitChanges));
+    }
+
+    #[test]
+    fn parses_keymaps_command() {
+        assert!(matches!(parse_command("Keymaps"), Command::Keymaps));
+        assert!(matches!(parse_command("keymaps"), Command::Keymaps));
+        assert!(matches!(parse_command("keys"), Command::Keymaps));
     }
 
     #[test]

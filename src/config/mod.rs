@@ -343,6 +343,12 @@ impl Default for KeymapSettings {
                     action: ":Terminals".to_string(),
                     desc: Some("Open terminal picker".to_string()),
                 },
+                // Keymap cheatsheet
+                LeaderMapping {
+                    key: "fk".to_string(),
+                    action: ":Keymaps".to_string(),
+                    desc: Some("Search keymaps".to_string()),
+                },
             ],
         }
     }

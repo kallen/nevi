@@ -586,4 +586,17 @@ mod tests {
         let key = parse_key_notation("<F12>").unwrap();
         assert_eq!(key.code, KeyCode::F(12));
     }
+
+    #[test]
+    fn default_leader_includes_keymaps_picker() {
+        use super::super::KeymapSettings;
+        let settings = KeymapSettings::default();
+        assert!(
+            settings
+                .leader_mappings
+                .iter()
+                .any(|m| m.key == "fk" && m.action.contains("Keymaps")),
+            "default leader mappings should bind fk -> :Keymaps"
+        );
+    }
 }

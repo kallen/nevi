@@ -4884,6 +4884,7 @@ impl Terminal {
             crate::finder::FinderMode::Marks => " Marks ",
             crate::finder::FinderMode::GitChanges => " Git Changes ",
             crate::finder::FinderMode::Terminals => " Terminals ",
+            crate::finder::FinderMode::Keymaps => " Key Maps ",
         };
 
         if preview_enabled {
@@ -7728,7 +7729,10 @@ fn handle_finder_mode(editor: &mut Editor, key: KeyEvent) {
 
         // Select item
         (KeyModifiers::NONE, KeyCode::Enter) => {
-            if let Some(item) = editor.finder_select() {
+            if editor.finder.mode == crate::finder::FinderMode::Keymaps {
+                // Read-only cheatsheet: Enter just closes, no action dispatched.
+                editor.finder_select();
+            } else if let Some(item) = editor.finder_select() {
                 if let Some(position) = item.terminal_session_position {
                     match editor.floating_terminal.select_session(position) {
                         Ok(message) => editor.set_status(message),
@@ -9082,6 +9086,10 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
         }
         Command::Themes => {
             editor.open_theme_picker();
+            CommandResult::Ok
+        }
+        Command::Keymaps => {
+            editor.open_keymaps_picker();
             CommandResult::Ok
         }
 
