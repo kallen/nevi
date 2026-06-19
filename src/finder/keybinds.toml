@@ -1,0 +1,2197 @@
+# ============================================================================
+# NEVI KEYBINDINGS
+# ============================================================================
+#
+# Documents Nevi's built-in default keybindings (motions, operators, text
+# objects, finder, terminal, registers). Embedded at build time to power the
+# :Keymaps cheatsheet picker.
+#
+# Scope: built-in *default* keys only. At runtime the :Keymaps picker overlays
+# this file with live sources, so the cheatsheet reflects actual behavior:
+#   - commands come from the editor's command registry;
+#   - leader bindings and the user's own remaps come from the user's config.
+# A user's remaps therefore appear even though they are not listed here.
+#
+# FORMAT:
+# [[mode.category]]   # or [[mode]] for flat sections (terminal, text_objects, registers)
+# key = "x"                    # The key(s) to press
+# action = "action_name"       # Editor action or ":Command<CR>"
+# desc = "Description"         # What it does
+# status = "implemented"       # "implemented" | "partial" | "planned"
+# vim_default = true           # Is this a standard vim keybind?
+#
+# MODIFIER NOTATION:
+# <C-x> = Ctrl+x    <A-x> = Alt+x    <S-x> = Shift+x
+# <CR> = Enter      <Esc> = Escape   <Tab> = Tab
+# <Space> = Space   <BS> = Backspace
+#
+# ORGANIZATION:
+# Within each category, implemented keybinds come first, followed by
+# a "--- NOT IMPLEMENTED YET ---" separator, then planned keybinds.
+#
+# Last Updated: 2026-06-18
+# ============================================================================
+
+# ============================================================================
+# NORMAL MODE
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Movement - Basic cursor movement
+# ----------------------------------------------------------------------------
+
+[[normal.movement]]
+key = "h"
+action = "move_left"
+desc = "Move cursor left"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "j"
+action = "move_down"
+desc = "Move cursor down"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "k"
+action = "move_up"
+desc = "Move cursor up"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "l"
+action = "move_right"
+desc = "Move cursor right"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "w"
+action = "word_forward"
+desc = "Move to start of next word"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "W"
+action = "word_forward_big"
+desc = "Move to start of next WORD"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "b"
+action = "word_backward"
+desc = "Move to start of previous word"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "B"
+action = "word_backward_big"
+desc = "Move to start of previous WORD"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "e"
+action = "word_end"
+desc = "Move to end of word"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "E"
+action = "word_end_big"
+desc = "Move to end of WORD"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "0"
+action = "line_start"
+desc = "Move to start of line"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "^"
+action = "first_non_blank"
+desc = "Move to first non-blank character"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "$"
+action = "line_end"
+desc = "Move to end of line"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "gg"
+action = "file_start"
+desc = "Move to start of file"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "G"
+action = "file_end"
+desc = "Move to end of file (or line N with count)"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "{"
+action = "paragraph_backward"
+desc = "Move to previous paragraph"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "}"
+action = "paragraph_forward"
+desc = "Move to next paragraph"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "%"
+action = "matching_bracket"
+desc = "Jump to matching bracket"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "H"
+action = "screen_top"
+desc = "Move to top of screen"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "M"
+action = "screen_middle"
+desc = "Move to middle of screen"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "L"
+action = "screen_bottom"
+desc = "Move to bottom of screen"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.movement]]
+key = "ge"
+action = "word_end_backward"
+desc = "Move to end of previous word"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "gE"
+action = "word_end_backward_big"
+desc = "Move to end of previous WORD"
+status = "implemented"
+vim_default = true
+
+[[normal.movement]]
+key = "("
+action = "sentence_backward"
+desc = "Move to previous sentence"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = ")"
+action = "sentence_forward"
+desc = "Move to next sentence"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "+"
+action = "next_line_first_non_blank"
+desc = "Move to first non-blank of next line"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "-"
+action = "prev_line_first_non_blank"
+desc = "Move to first non-blank of previous line"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "gj"
+action = "display_line_down"
+desc = "Move down by display line (for wrapped lines)"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "gk"
+action = "display_line_up"
+desc = "Move up by display line (for wrapped lines)"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "g0"
+action = "display_line_start"
+desc = "Move to start of display line"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "g$"
+action = "display_line_end"
+desc = "Move to end of display line"
+status = "planned"
+vim_default = true
+
+[[normal.movement]]
+key = "g^"
+action = "display_line_first_non_blank"
+desc = "Move to first non-blank of display line"
+status = "planned"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Movement - Find character (ALL IMPLEMENTED)
+# ----------------------------------------------------------------------------
+
+[[normal.find]]
+key = "f{char}"
+action = "find_char"
+desc = "Find character forward on line"
+status = "implemented"
+vim_default = true
+
+[[normal.find]]
+key = "F{char}"
+action = "find_char_backward"
+desc = "Find character backward on line"
+status = "implemented"
+vim_default = true
+
+[[normal.find]]
+key = "t{char}"
+action = "till_char"
+desc = "Move till character forward"
+status = "implemented"
+vim_default = true
+
+[[normal.find]]
+key = "T{char}"
+action = "till_char_backward"
+desc = "Move till character backward"
+status = "implemented"
+vim_default = true
+
+[[normal.find]]
+key = ";"
+action = "repeat_find"
+desc = "Repeat last f/F/t/T"
+status = "implemented"
+vim_default = true
+
+[[normal.find]]
+key = ","
+action = "repeat_find_reverse"
+desc = "Repeat last f/F/t/T in reverse"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Movement - Scrolling (ALL IMPLEMENTED)
+# ----------------------------------------------------------------------------
+
+[[normal.scroll]]
+key = "<C-f>"
+action = "page_down"
+desc = "Scroll page down"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "<C-b>"
+action = "page_up"
+desc = "Scroll page up"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "<C-d>"
+action = "half_page_down"
+desc = "Scroll half page down"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "<C-u>"
+action = "half_page_up"
+desc = "Scroll half page up"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "zz"
+action = "center_cursor"
+desc = "Center cursor on screen"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "zt"
+action = "cursor_to_top"
+desc = "Move cursor line to top of screen"
+status = "implemented"
+vim_default = true
+
+[[normal.scroll]]
+key = "zb"
+action = "cursor_to_bottom"
+desc = "Move cursor line to bottom of screen"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Movement - Jump list
+# ----------------------------------------------------------------------------
+
+[[normal.jumps]]
+key = "<C-o>"
+action = "jump_back"
+desc = "Jump to older position in jump list"
+status = "implemented"
+vim_default = true
+
+[[normal.jumps]]
+key = "<C-i>"
+action = "jump_forward"
+desc = "Jump to newer position in jump list"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.jumps]]
+key = "''"
+action = "jump_to_previous_position"
+desc = "Jump to position before last jump"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "``"
+action = "jump_to_previous_position_exact"
+desc = "Jump to exact position before last jump"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "'."
+action = "jump_to_last_change"
+desc = "Jump to line of last change"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "`."
+action = "jump_to_last_change_exact"
+desc = "Jump to exact position of last change"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "'^"
+action = "jump_to_last_insert"
+desc = "Jump to line of last insert"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "`^"
+action = "jump_to_last_insert_exact"
+desc = "Jump to exact position of last insert"
+status = "planned"
+vim_default = true
+
+[[normal.jumps]]
+key = "gi"
+action = "goto_last_insert_and_insert"
+desc = "Jump to last insert position and enter insert mode"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Editing - Operators
+# ----------------------------------------------------------------------------
+
+[[normal.editing]]
+key = "d{motion}"
+action = "delete"
+desc = "Delete with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "dd"
+action = "delete_line"
+desc = "Delete entire line"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "D"
+action = "delete_to_end"
+desc = "Delete to end of line"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "c{motion}"
+action = "change"
+desc = "Change with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "cc"
+action = "change_line"
+desc = "Change entire line"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "C"
+action = "change_to_end"
+desc = "Change to end of line"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "y{motion}"
+action = "yank"
+desc = "Yank (copy) with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "yy"
+action = "yank_line"
+desc = "Yank entire line"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "Y"
+action = "yank_line"
+desc = "Yank entire line (like yy)"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "p"
+action = "paste_after"
+desc = "Paste after cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "P"
+action = "paste_before"
+desc = "Paste before cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "x"
+action = "delete_char"
+desc = "Delete character under cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "X"
+action = "delete_char_before"
+desc = "Delete character before cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "r{char}"
+action = "replace_char"
+desc = "Replace character under cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "J"
+action = "join_lines"
+desc = "Join line below with space"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "."
+action = "repeat_last_change"
+desc = "Repeat last change"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "u"
+action = "undo"
+desc = "Undo last change"
+status = "implemented"
+vim_default = true
+
+[[normal.editing]]
+key = "<C-r>"
+action = "redo"
+desc = "Redo last undone change"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.editing]]
+key = "gp"
+action = "paste_after_move"
+desc = "Paste after and move cursor after text"
+status = "planned"
+vim_default = true
+
+[[normal.editing]]
+key = "gP"
+action = "paste_before_move"
+desc = "Paste before and move cursor after text"
+status = "planned"
+vim_default = true
+
+[[normal.editing]]
+key = "gJ"
+action = "join_lines_no_space"
+desc = "Join line below without space"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Editing - Indent (PARTIAL)
+# ----------------------------------------------------------------------------
+
+[[normal.indent]]
+key = ">>"
+action = "indent_line_right"
+desc = "Indent current line"
+status = "implemented"
+vim_default = true
+
+[[normal.indent]]
+key = "<<"
+action = "indent_line_left"
+desc = "Dedent current line"
+status = "implemented"
+vim_default = true
+
+[[normal.indent]]
+key = ">{motion}"
+action = "indent_right"
+desc = "Indent with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.indent]]
+key = "<{motion}"
+action = "indent_left"
+desc = "Dedent with motion"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.indent]]
+key = "={motion}"
+action = "auto_indent"
+desc = "Auto-indent with motion"
+status = "planned"
+vim_default = true
+
+[[normal.indent]]
+key = "=="
+action = "auto_indent_line"
+desc = "Auto-indent current line"
+status = "planned"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Editing - Case
+# ----------------------------------------------------------------------------
+
+[[normal.case]]
+key = "~"
+action = "swap_case_char"
+desc = "Swap case of character under cursor"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "gu{motion}"
+action = "lowercase"
+desc = "Convert to lowercase with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "guu"
+action = "lowercase_line"
+desc = "Convert entire line to lowercase"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "gU{motion}"
+action = "uppercase"
+desc = "Convert to uppercase with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "gUU"
+action = "uppercase_line"
+desc = "Convert entire line to uppercase"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "g~{motion}"
+action = "swap_case"
+desc = "Swap case with motion"
+status = "implemented"
+vim_default = true
+
+[[normal.case]]
+key = "g~~"
+action = "swap_case_line"
+desc = "Swap case of entire line"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Marks (ALL IMPLEMENTED)
+# ----------------------------------------------------------------------------
+
+[[normal.marks]]
+key = "m{a-z}"
+action = "set_mark"
+desc = "Set local mark at cursor position"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "'{a-z}"
+action = "jump_mark_line"
+desc = "Jump to line of mark"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "`{a-z}"
+action = "jump_mark_exact"
+desc = "Jump to exact position of mark"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "m{A-Z}"
+action = "set_global_mark"
+desc = "Set global mark (cross-file)"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "'{A-Z}"
+action = "jump_global_mark_line"
+desc = "Jump to line of global mark"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "`{A-Z}"
+action = "jump_global_mark_exact"
+desc = "Jump to exact position of global mark"
+status = "implemented"
+vim_default = true
+
+[[normal.marks]]
+key = "''"
+action = "jump_previous_position"
+desc = "Jump to position before last jump (toggles)"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Macros
+# ----------------------------------------------------------------------------
+
+[[normal.macros]]
+key = "q{a-z}"
+action = "record_macro"
+desc = "Start recording macro into register"
+status = "implemented"
+vim_default = true
+
+[[normal.macros]]
+key = "q"
+action = "stop_recording"
+desc = "Stop recording macro (when recording)"
+status = "implemented"
+vim_default = true
+
+[[normal.macros]]
+key = "@{a-z}"
+action = "play_macro"
+desc = "Play macro from register"
+status = "implemented"
+vim_default = true
+
+[[normal.macros]]
+key = "@@"
+action = "replay_last_macro"
+desc = "Replay last executed macro"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Search
+# ----------------------------------------------------------------------------
+
+[[normal.search]]
+key = "/"
+action = "search_forward"
+desc = "Search forward"
+status = "implemented"
+vim_default = true
+
+[[normal.search]]
+key = "?"
+action = "search_backward"
+desc = "Search backward"
+status = "implemented"
+vim_default = true
+
+[[normal.search]]
+key = "n"
+action = "search_next"
+desc = "Go to next search match"
+status = "implemented"
+vim_default = true
+
+[[normal.search]]
+key = "N"
+action = "search_prev"
+desc = "Go to previous search match"
+status = "implemented"
+vim_default = true
+
+[[normal.search]]
+key = "*"
+action = "search_word_forward"
+desc = "Search word under cursor forward"
+status = "implemented"
+vim_default = true
+
+[[normal.search]]
+key = "#"
+action = "search_word_backward"
+desc = "Search word under cursor backward"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.search]]
+key = "gn"
+action = "search_and_select"
+desc = "Search forward and select match"
+status = "planned"
+vim_default = true
+
+[[normal.search]]
+key = "gN"
+action = "search_and_select_backward"
+desc = "Search backward and select match"
+status = "planned"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# LSP
+# ----------------------------------------------------------------------------
+
+[[normal.lsp]]
+key = "gd"
+action = "goto_definition"
+desc = "Go to definition"
+status = "implemented"
+vim_default = false
+note = "LSP feature, common neovim mapping"
+
+[[normal.lsp]]
+key = "gr"
+action = "find_references"
+desc = "Find all references"
+status = "implemented"
+vim_default = false
+
+[[normal.lsp]]
+key = "K"
+action = "hover"
+desc = "Show hover documentation"
+status = "implemented"
+vim_default = true
+note = "Vim K runs keywordprg; we use it for LSP hover"
+
+[[normal.lsp]]
+key = "gl"
+action = "diagnostic_float"
+desc = "Show diagnostic in floating window"
+status = "implemented"
+vim_default = false
+
+[[normal.lsp]]
+key = "]d"
+action = "next_diagnostic"
+desc = "Go to next diagnostic"
+status = "implemented"
+vim_default = false
+
+[[normal.lsp]]
+key = "[d"
+action = "prev_diagnostic"
+desc = "Go to previous diagnostic"
+status = "implemented"
+vim_default = false
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.lsp]]
+key = "gD"
+action = "goto_declaration"
+desc = "Go to declaration"
+status = "planned"
+vim_default = false
+
+[[normal.lsp]]
+key = "gI"
+action = "goto_implementation"
+desc = "Go to implementation"
+status = "planned"
+vim_default = false
+note = "Using gI to avoid conflict with vim's gi"
+
+# ----------------------------------------------------------------------------
+# Surround (vim-surround style) - ALL IMPLEMENTED
+# ----------------------------------------------------------------------------
+
+[[normal.surround]]
+key = "ds{char}"
+action = "delete_surrounding"
+desc = "Delete surrounding pair"
+status = "implemented"
+vim_default = false
+note = "vim-surround plugin"
+
+[[normal.surround]]
+key = "cs{old}{new}"
+action = "change_surrounding"
+desc = "Change surrounding pair"
+status = "implemented"
+vim_default = false
+
+[[normal.surround]]
+key = "ys{motion}{char}"
+action = "add_surrounding"
+desc = "Add surrounding pair"
+status = "implemented"
+vim_default = false
+
+# ----------------------------------------------------------------------------
+# Comment (comment.nvim style) - ALL IMPLEMENTED
+# ----------------------------------------------------------------------------
+
+[[normal.comment]]
+key = "gcc"
+action = "toggle_comment_line"
+desc = "Toggle comment on current line"
+status = "implemented"
+vim_default = false
+
+[[normal.comment]]
+key = "gc{motion}"
+action = "toggle_comment"
+desc = "Toggle comment with motion"
+status = "implemented"
+vim_default = false
+
+# ----------------------------------------------------------------------------
+# G commands - Miscellaneous (NOT IMPLEMENTED YET)
+# ----------------------------------------------------------------------------
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.g_commands]]
+key = "gf"
+action = "goto_file"
+desc = "Go to file under cursor"
+status = "planned"
+vim_default = true
+
+[[normal.g_commands]]
+key = "gx"
+action = "open_url"
+desc = "Open URL under cursor"
+status = "planned"
+vim_default = true
+
+[[normal.g_commands]]
+key = "gv"
+action = "reselect_visual"
+desc = "Reselect last visual selection"
+status = "implemented"
+vim_default = true
+
+[[normal.g_commands]]
+key = "g;"
+action = "goto_older_change"
+desc = "Go to older position in change list"
+status = "implemented"
+vim_default = true
+
+[[normal.g_commands]]
+key = "g,"
+action = "goto_newer_change"
+desc = "Go to newer position in change list"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Mode switching (ALL IMPLEMENTED)
+# ----------------------------------------------------------------------------
+
+[[normal.mode]]
+key = "i"
+action = "insert_before"
+desc = "Enter insert mode before cursor"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "a"
+action = "insert_after"
+desc = "Enter insert mode after cursor"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "I"
+action = "insert_line_start"
+desc = "Enter insert mode at first non-blank"
+status = "implemented"
+vim_default = true
+
+[[normal.mode]]
+key = "A"
+action = "insert_line_end"
+desc = "Enter insert mode at end of line"
+status = "implemented"
+vim_default = true
+
+[[normal.mode]]
+key = "o"
+action = "open_below"
+desc = "Open new line below and enter insert"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "O"
+action = "open_above"
+desc = "Open new line above and enter insert"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "gi"
+action = "goto_last_insert"
+desc = "Go to last insert position and enter insert mode"
+status = "implemented"
+vim_default = true
+
+[[normal.mode]]
+key = "v"
+action = "enter_visual"
+desc = "Enter visual mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "V"
+action = "enter_visual_line"
+desc = "Enter visual line mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "<C-v>"
+action = "enter_visual_block"
+desc = "Enter visual block mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[normal.mode]]
+key = "R"
+action = "enter_replace"
+desc = "Enter replace mode"
+status = "implemented"
+vim_default = true
+
+[[normal.mode]]
+key = ":"
+action = "enter_command"
+desc = "Enter command mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+# ----------------------------------------------------------------------------
+# Harpoon (harpoon.nvim style) - ALL IMPLEMENTED
+# ----------------------------------------------------------------------------
+
+[[normal.harpoon]]
+key = "]h"
+action = "harpoon_next"
+desc = "Go to next harpoon file"
+status = "implemented"
+vim_default = false
+
+[[normal.harpoon]]
+key = "[h"
+action = "harpoon_prev"
+desc = "Go to previous harpoon file"
+status = "implemented"
+vim_default = false
+
+# ----------------------------------------------------------------------------
+# Window management
+# ----------------------------------------------------------------------------
+
+[[normal.window]]
+key = "<C-w>v"
+action = "split_vertical"
+desc = "Split window vertically"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>s"
+action = "split_horizontal"
+desc = "Split window horizontally"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>c"
+action = "close_window"
+desc = "Close current window"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>o"
+action = "close_other_windows"
+desc = "Close all other windows"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>q"
+action = "quit_window"
+desc = "Quit current window"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>w"
+action = "next_window"
+desc = "Move to next window"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>p"
+action = "prev_window"
+desc = "Move to previous window"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>h"
+action = "window_left"
+desc = "Move to window on left"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>j"
+action = "window_down"
+desc = "Move to window below"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>k"
+action = "window_up"
+desc = "Move to window above"
+status = "implemented"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>l"
+action = "window_right"
+desc = "Move to window on right"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[normal.window]]
+key = "<C-w>="
+action = "equalize_windows"
+desc = "Make all windows equal size"
+status = "planned"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>r"
+action = "rotate_windows"
+desc = "Rotate windows down/right"
+status = "planned"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>R"
+action = "rotate_windows_reverse"
+desc = "Rotate windows up/left"
+status = "planned"
+vim_default = true
+
+[[normal.window]]
+key = "<C-w>x"
+action = "exchange_window"
+desc = "Exchange current window with next"
+status = "planned"
+vim_default = true
+
+# ============================================================================
+# INSERT MODE
+# ============================================================================
+
+[[insert.editing]]
+key = "<Esc>"
+action = "exit_insert"
+desc = "Exit insert mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[insert.editing]]
+key = "<C-[>"
+action = "exit_insert"
+desc = "Exit insert mode (alternative)"
+status = "implemented"
+vim_default = true
+
+[[insert.editing]]
+key = "<BS>"
+action = "delete_char_before"
+desc = "Delete character before cursor"
+status = "implemented"
+vim_default = true
+
+[[insert.editing]]
+key = "<CR>"
+action = "new_line"
+desc = "Insert new line"
+status = "implemented"
+vim_default = true
+
+[[insert.editing]]
+key = "<Tab>"
+action = "insert_tab"
+desc = "Insert tab/spaces"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[insert.editing]]
+key = "<C-w>"
+action = "delete_word_before"
+desc = "Delete word before cursor"
+status = "implemented"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-u>"
+action = "delete_to_line_start"
+desc = "Delete to beginning of line"
+status = "implemented"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-o>"
+action = "insert_normal_once"
+desc = "Execute one normal mode command"
+status = "planned"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-r>{reg}"
+action = "insert_register"
+desc = "Insert contents of register"
+status = "planned"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-t>"
+action = "indent_line"
+desc = "Increase indent of current line"
+status = "planned"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-d>"
+action = "dedent_line"
+desc = "Decrease indent of current line"
+status = "planned"
+vim_default = true
+
+[[insert.editing]]
+key = "<C-a>"
+action = "insert_last_inserted"
+desc = "Insert previously inserted text"
+status = "planned"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Copilot (in insert mode) - ALL IMPLEMENTED
+# ----------------------------------------------------------------------------
+
+[[insert.copilot]]
+key = "<C-l>"
+action = "copilot_accept"
+desc = "Accept Copilot suggestion"
+status = "implemented"
+vim_default = false
+
+[[insert.copilot]]
+key = "<A-]>"
+action = "copilot_next"
+desc = "Next Copilot suggestion"
+status = "implemented"
+vim_default = false
+
+[[insert.copilot]]
+key = "<A-[>"
+action = "copilot_prev"
+desc = "Previous Copilot suggestion"
+status = "implemented"
+vim_default = false
+
+# ============================================================================
+# VISUAL MODE
+# ============================================================================
+
+[[visual.editing]]
+key = "<Esc>"
+action = "exit_visual"
+desc = "Exit visual mode"
+status = "implemented"
+vim_default = true
+locked = true
+
+[[visual.editing]]
+key = "d"
+action = "delete_selection"
+desc = "Delete selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "c"
+action = "change_selection"
+desc = "Change selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "y"
+action = "yank_selection"
+desc = "Yank selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "p"
+action = "paste_over_selection"
+desc = "Paste over selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "o"
+action = "swap_selection_end"
+desc = "Go to other end of selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = ">"
+action = "indent_selection"
+desc = "Indent selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "<"
+action = "dedent_selection"
+desc = "Dedent selection"
+status = "implemented"
+vim_default = true
+
+[[visual.editing]]
+key = "gc"
+action = "toggle_comment_selection"
+desc = "Toggle comment on selection"
+status = "implemented"
+vim_default = false
+
+[[visual.editing]]
+key = "S{char}"
+action = "surround_selection"
+desc = "Surround selection with pair"
+status = "implemented"
+vim_default = false
+
+# --- NOT IMPLEMENTED YET ---
+
+[[visual.editing]]
+key = "O"
+action = "swap_selection_corner"
+desc = "Go to other corner (block mode)"
+status = "planned"
+vim_default = true
+
+# ============================================================================
+# LEADER MAPPINGS (ALL IMPLEMENTED)
+# ============================================================================
+
+[[leader.files]]
+key = "w"
+action = ":w<CR>"
+desc = "Save file"
+status = "implemented"
+
+[[leader.files]]
+key = "q"
+action = ":q<CR>"
+desc = "Quit"
+status = "implemented"
+
+[[leader.files]]
+key = "e"
+action = ":Explorer<CR>"
+desc = "Toggle file explorer"
+status = "implemented"
+
+[[leader.files]]
+key = "ff"
+action = ":FindFiles<CR>"
+desc = "Find files"
+status = "implemented"
+
+[[leader.files]]
+key = "fg"
+action = ":LiveGrep<CR>"
+desc = "Live grep (search in files)"
+status = "implemented"
+
+[[leader.files]]
+key = "sw"
+action = ":SearchWord<CR>"
+desc = "Search word under cursor (grep)"
+status = "implemented"
+
+[[leader.files]]
+key = "fb"
+action = ":FindBuffers<CR>"
+desc = "Find buffers"
+status = "implemented"
+
+[[leader.files]]
+key = "ft"
+action = ":Themes<CR>"
+desc = "Open theme picker"
+status = "implemented"
+
+[[leader.files]]
+key = "fk"
+action = ":Keymaps<CR>"
+desc = "Search keymaps"
+status = "implemented"
+
+[[leader.lsp]]
+key = "ca"
+action = ":codeaction<CR>"
+desc = "Code actions"
+status = "implemented"
+
+[[leader.lsp]]
+key = "rn"
+action = ":rn<CR>"
+desc = "Rename symbol"
+status = "implemented"
+
+[[leader.lsp]]
+key = "D"
+action = ":DiagnosticFloat<CR>"
+desc = "Show line diagnostic"
+status = "implemented"
+
+[[leader.lsp]]
+key = "d"
+action = ":SearchDiagnostics<CR>"
+desc = "Search diagnostics"
+status = "implemented"
+
+[[leader.git]]
+key = "gg"
+action = ":LazyGit<CR>"
+desc = "Open lazygit"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "m"
+action = "harpoon_add"
+desc = "Add file to harpoon"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "h"
+action = "harpoon_menu"
+desc = "Open harpoon menu"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "1"
+action = "harpoon_goto_1"
+desc = "Go to harpoon slot 1"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "2"
+action = "harpoon_goto_2"
+desc = "Go to harpoon slot 2"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "3"
+action = "harpoon_goto_3"
+desc = "Go to harpoon slot 3"
+status = "implemented"
+
+[[leader.harpoon]]
+key = "4"
+action = "harpoon_goto_4"
+desc = "Go to harpoon slot 4"
+status = "implemented"
+
+# ============================================================================
+# TERMINAL MODE (ALL IMPLEMENTED)
+# ============================================================================
+
+[[terminal]]
+key = "<C-\\>"
+action = "toggle_terminal"
+desc = "Toggle floating terminal"
+status = "implemented"
+vim_default = false
+
+# ============================================================================
+# FINDER MODE (File Finder, Live Grep, Buffer Picker)
+# ============================================================================
+# These keybinds are active when a finder popup is open
+
+[[finder.navigation]]
+key = "<C-j>"
+action = "select_next"
+desc = "Move to next result (insert mode)"
+status = "implemented"
+vim_default = false
+
+[[finder.navigation]]
+key = "<C-k>"
+action = "select_prev"
+desc = "Move to previous result (insert mode)"
+status = "implemented"
+vim_default = false
+
+[[finder.navigation]]
+key = "<Down>"
+action = "select_next"
+desc = "Move to next result"
+status = "implemented"
+vim_default = false
+
+[[finder.navigation]]
+key = "<Up>"
+action = "select_prev"
+desc = "Move to previous result"
+status = "implemented"
+vim_default = false
+
+[[finder.navigation]]
+key = "j"
+action = "select_next"
+desc = "Move to next result (normal mode)"
+status = "implemented"
+vim_default = true
+note = "Only in finder normal mode"
+
+[[finder.navigation]]
+key = "k"
+action = "select_prev"
+desc = "Move to previous result (normal mode)"
+status = "implemented"
+vim_default = true
+note = "Only in finder normal mode"
+
+[[finder.navigation]]
+key = "g"
+action = "goto_top"
+desc = "Go to first result (normal mode)"
+status = "implemented"
+vim_default = true
+note = "Only in finder normal mode"
+
+[[finder.navigation]]
+key = "G"
+action = "goto_bottom"
+desc = "Go to last result (normal mode)"
+status = "implemented"
+vim_default = true
+note = "Only in finder normal mode"
+
+[[finder.actions]]
+key = "<CR>"
+action = "confirm_selection"
+desc = "Open selected file/result"
+status = "implemented"
+vim_default = true
+
+[[finder.actions]]
+key = "<Esc>"
+action = "close_finder"
+desc = "Close finder (or switch to normal mode)"
+status = "implemented"
+vim_default = true
+
+[[finder.actions]]
+key = "<C-t>"
+action = "toggle_preview"
+desc = "Toggle preview panel (50/50 split)"
+status = "implemented"
+vim_default = false
+note = "Works in File Finder and Live Grep"
+
+[[finder.actions]]
+key = "p"
+action = "toggle_preview"
+desc = "Toggle preview panel (normal mode)"
+status = "implemented"
+vim_default = false
+note = "Only in finder normal mode"
+
+[[finder.mode]]
+key = "i"
+action = "enter_insert_mode"
+desc = "Enter insert mode (from normal mode)"
+status = "implemented"
+vim_default = true
+note = "Only in finder normal mode"
+
+[[finder.preview]]
+key = "<C-d>"
+action = "scroll_preview_down"
+desc = "Scroll preview down"
+status = "planned"
+vim_default = false
+
+[[finder.preview]]
+key = "<C-u>"
+action = "scroll_preview_up"
+desc = "Scroll preview up"
+status = "planned"
+vim_default = false
+
+# ============================================================================
+# TEXT OBJECTS
+# ============================================================================
+# Used with operators like d, c, y: e.g., diw, ci", ya{
+
+[[text_objects]]
+key = "iw"
+action = "inner_word"
+desc = "Inner word"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "aw"
+action = "around_word"
+desc = "Around word (includes trailing space)"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "iW"
+action = "inner_word_big"
+desc = "Inner WORD"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "aW"
+action = "around_word_big"
+desc = "Around WORD"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i\""
+action = "inner_double_quote"
+desc = "Inner double quotes"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a\""
+action = "around_double_quote"
+desc = "Around double quotes"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i'"
+action = "inner_single_quote"
+desc = "Inner single quotes"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a'"
+action = "around_single_quote"
+desc = "Around single quotes"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i`"
+action = "inner_backtick"
+desc = "Inner backticks"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a`"
+action = "around_backtick"
+desc = "Around backticks"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i("
+action = "inner_paren"
+desc = "Inner parentheses"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a("
+action = "around_paren"
+desc = "Around parentheses"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "ib"
+action = "inner_paren"
+desc = "Inner parentheses (alias)"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "ab"
+action = "around_paren"
+desc = "Around parentheses (alias)"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i{"
+action = "inner_brace"
+desc = "Inner braces"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a{"
+action = "around_brace"
+desc = "Around braces"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "iB"
+action = "inner_brace"
+desc = "Inner braces (alias)"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "aB"
+action = "around_brace"
+desc = "Around braces (alias)"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i["
+action = "inner_bracket"
+desc = "Inner brackets"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a["
+action = "around_bracket"
+desc = "Around brackets"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "i<"
+action = "inner_angle"
+desc = "Inner angle brackets"
+status = "implemented"
+vim_default = true
+
+[[text_objects]]
+key = "a<"
+action = "around_angle"
+desc = "Around angle brackets"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[text_objects]]
+key = "ip"
+action = "inner_paragraph"
+desc = "Inner paragraph"
+status = "planned"
+vim_default = true
+
+[[text_objects]]
+key = "ap"
+action = "around_paragraph"
+desc = "Around paragraph"
+status = "planned"
+vim_default = true
+
+[[text_objects]]
+key = "is"
+action = "inner_sentence"
+desc = "Inner sentence"
+status = "planned"
+vim_default = true
+
+[[text_objects]]
+key = "as"
+action = "around_sentence"
+desc = "Around sentence"
+status = "planned"
+vim_default = true
+
+[[text_objects]]
+key = "it"
+action = "inner_tag"
+desc = "Inner HTML/XML tag"
+status = "planned"
+vim_default = true
+
+[[text_objects]]
+key = "at"
+action = "around_tag"
+desc = "Around HTML/XML tag"
+status = "planned"
+vim_default = true
+
+# ============================================================================
+# REGISTERS
+# ============================================================================
+
+[[registers]]
+key = "\"{a-z}"
+action = "use_register"
+desc = "Use named register for next operation"
+status = "implemented"
+vim_default = true
+
+[[registers]]
+key = "\"{A-Z}"
+action = "append_register"
+desc = "Append to named register"
+status = "implemented"
+vim_default = true
+
+[[registers]]
+key = "\"+"
+action = "use_clipboard"
+desc = "Use system clipboard"
+status = "implemented"
+vim_default = true
+
+[[registers]]
+key = "\"*"
+action = "use_selection"
+desc = "Use selection clipboard"
+status = "implemented"
+vim_default = true
+
+[[registers]]
+key = "\"_"
+action = "use_blackhole"
+desc = "Use black hole register (discard)"
+status = "implemented"
+vim_default = true
+
+[[registers]]
+key = "\"0"
+action = "use_yank_register"
+desc = "Use last yank register"
+status = "implemented"
+vim_default = true
+
+# --- NOT IMPLEMENTED YET ---
+
+[[registers]]
+key = "\"."
+action = "last_inserted_text"
+desc = "Last inserted text (read-only)"
+status = "planned"
+vim_default = true
+
+[[registers]]
+key = "\"%"
+action = "current_filename"
+desc = "Current filename (read-only)"
+status = "planned"
+vim_default = true
+
+[[registers]]
+key = "\":"
+action = "last_command"
+desc = "Last command (read-only)"
+status = "planned"
+vim_default = true
+
+[[registers]]
+key = "\"#"
+action = "alternate_file"
+desc = "Alternate file name (read-only)"
+status = "planned"
+vim_default = true
+
+[[registers]]
+key = "\"="
+action = "expression_register"
+desc = "Expression register"
+status = "planned"
+vim_default = true
+
+# ============================================================================
+# COMMAND MODE (Ex commands)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# File operations
+# ----------------------------------------------------------------------------
+
+[[commands.file]]
+key = ":w"
+action = "write"
+desc = "Write (save) current buffer"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":wa"
+action = "write_all"
+desc = "Write all modified buffers"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":q"
+action = "quit"
+desc = "Quit (fails if unsaved changes)"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":q!"
+action = "force_quit"
+desc = "Force quit (discard changes)"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":qa"
+action = "quit_all"
+desc = "Quit all (fails if any unsaved)"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":qa!"
+action = "force_quit_all"
+desc = "Force quit all (discard all changes)"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":wq"
+action = "write_quit"
+desc = "Write and quit"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":wqa"
+action = "write_quit_all"
+desc = "Write all and quit"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":x"
+action = "write_quit_if_modified"
+desc = "Write if modified and quit"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":xa"
+action = "write_quit_all_if_modified"
+desc = "Write all (if modified) and quit"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":e {file}"
+action = "edit"
+desc = "Edit a file"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":vs"
+action = "vertical_split"
+desc = "Vertical split"
+status = "implemented"
+vim_default = true
+
+[[commands.file]]
+key = ":sp"
+action = "horizontal_split"
+desc = "Horizontal split"
+status = "implemented"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Buffer navigation
+# ----------------------------------------------------------------------------
+
+[[commands.buffer]]
+key = ":bn"
+action = "buffer_next"
+desc = "Go to next buffer"
+status = "implemented"
+vim_default = true
+
+[[commands.buffer]]
+key = ":bp"
+action = "buffer_prev"
+desc = "Go to previous buffer"
+status = "implemented"
+vim_default = true
+
+[[commands.buffer]]
+key = ":bd"
+action = "buffer_delete"
+desc = "Delete (close) buffer (not wired to the command parser yet)"
+status = "planned"
+vim_default = true
+
+# ----------------------------------------------------------------------------
+# Search and navigation
+# ----------------------------------------------------------------------------
+
+[[commands.navigation]]
+key = ":{number}"
+action = "goto_line"
+desc = "Go to line number"
+status = "implemented"
+vim_default = true
+
+[[commands.navigation]]
+key = ":FindFiles"
+action = "find_files"
+desc = "Open file finder"
+status = "implemented"
+vim_default = false
+
+[[commands.navigation]]
+key = ":LiveGrep"
+action = "live_grep"
+desc = "Search in files"
+status = "implemented"
+vim_default = false
+
+[[commands.navigation]]
+key = ":FindBuffers"
+action = "find_buffers"
+desc = "Open buffer finder"
+status = "implemented"
+vim_default = false
+
+[[commands.navigation]]
+key = ":FindDiagnostics"
+action = "find_diagnostics"
+desc = "Open diagnostics finder"
+status = "implemented"
+vim_default = false
+
+[[commands.navigation]]
+key = ":Explorer"
+action = "toggle_explorer"
+desc = "Toggle file explorer"
+status = "implemented"
+vim_default = false
+
+# ----------------------------------------------------------------------------
+# LSP commands
+# ----------------------------------------------------------------------------
+
+[[commands.lsp]]
+key = ":rn"
+action = "rename"
+desc = "Rename symbol under cursor"
+status = "implemented"
+vim_default = false
+
+[[commands.lsp]]
+key = ":codeaction"
+action = "code_action"
+desc = "Show code actions"
+status = "implemented"
+vim_default = false
+
+[[commands.lsp]]
+key = ":DiagnosticFloat"
+action = "diagnostic_float"
+desc = "Show diagnostic in float"
+status = "implemented"
+vim_default = false
+
+# ----------------------------------------------------------------------------
+# Other commands
+# ----------------------------------------------------------------------------
+
+[[commands.other]]
+key = ":Themes"
+action = "theme_picker"
+desc = "Open theme picker"
+status = "implemented"
+vim_default = false
+
+[[commands.other]]
+key = ":LazyGit"
+action = "lazygit"
+desc = "Open lazygit"
+status = "implemented"
+vim_default = false
+
+[[commands.other]]
+key = ":HarpoonAdd"
+action = "harpoon_add"
+desc = "Add file to harpoon"
+status = "implemented"
+vim_default = false
+
+[[commands.other]]
+key = ":HarpoonMenu"
+action = "harpoon_menu"
+desc = "Open harpoon menu"
+status = "implemented"
+vim_default = false
+
+[[commands.marks]]
+key = ":marks"
+action = "marks"
+desc = "Show all marks in interactive picker"
+status = "implemented"
+vim_default = true
+
+[[commands.marks]]
+key = ":delmarks {marks}"
+action = "delmarks"
+desc = "Delete specified marks (e.g., :delmarks a, :delmarks a-d, :delmarks aB)"
+status = "implemented"
+vim_default = true
+
+[[commands.marks]]
+key = ":delmarks!"
+action = "delmarks_all"
+desc = "Delete all lowercase marks (a-z) in current buffer"
+status = "implemented"
+vim_default = true

@@ -1190,7 +1190,7 @@ mod tests {
 
     #[test]
     fn keymap_items_are_inert() {
-        let items = crate::finder::keymap_finder_items();
+        let items = crate::finder::keymap_finder_items(&crate::config::KeymapSettings::default());
         assert!(!items.is_empty(), "expected some implemented keybindings");
         for item in &items {
             assert_eq!(item.path, std::path::PathBuf::new(), "keymap items must have no path");

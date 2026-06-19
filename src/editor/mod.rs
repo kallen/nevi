@@ -6909,7 +6909,7 @@ impl Editor {
 
     /// Open the fuzzy finder in keymaps cheatsheet mode (read-only).
     pub fn open_keymaps_picker(&mut self) {
-        let items = crate::finder::keymap_finder_items();
+        let items = crate::finder::keymap_finder_items(&self.settings.keymap);
         self.finder.open_keymaps(items);
         self.mode = Mode::Finder;
     }

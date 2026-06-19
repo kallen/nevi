@@ -759,6 +759,20 @@ fn command_history_path() -> PathBuf {
 }
 
 /// Parse a command string into a Command
+/// Rows for the keymap cheatsheet: `(":CommandName", description)` for every
+/// registered command. Sourced from the live `COMMAND_SPECS` registry, so this
+/// can never drift from the commands the editor actually accepts.
+pub fn command_cheatsheet_rows() -> Vec<(String, String)> {
+    let mut rows: Vec<(String, String)> = COMMAND_SPECS
+        .iter()
+        .map(|spec| (format!(":{}", spec.command), spec.description.to_string()))
+        .collect();
+    // `:{number}` (go to line) is parser-only — not a named spec. (`:q!`/`:qa!`
+    // are already in COMMAND_SPECS, so they must not be re-added here.)
+    rows.push((":{number}".to_string(), "Go to line number".to_string()));
+    rows
+}
+
 pub fn parse_command(input: &str) -> Command {
     let input = input.trim();
 
@@ -1521,6 +1535,28 @@ mod tests {
         assert!(matches!(parse_command("Keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keys"), Command::Keymaps));
+    }
+
+    #[test]
+    fn command_cheatsheet_includes_all_registered_commands() {
+        let rows = command_cheatsheet_rows();
+        assert!(
+            rows.iter().any(|(name, _)| name == ":GitChanges"),
+            "registry-sourced rows should include :GitChanges"
+        );
+        assert!(
+            rows.iter().any(|(name, _)| name == ":{number}"),
+            "parser-only commands like :{{number}} should be documented"
+        );
+        assert_eq!(
+            rows.iter().filter(|(name, _)| name == ":q!").count(),
+            1,
+            ":q! should appear once (from COMMAND_SPECS, not duplicated)"
+        );
+        assert!(
+            rows.iter().all(|(_, desc)| !desc.is_empty()),
+            "every command row should have a description"
+        );
     }
 
     #[test]

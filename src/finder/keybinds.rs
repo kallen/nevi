@@ -1,7 +1,8 @@
-//! Keybinding cheatsheet data, parsed from the embedded `KEYBINDS.toml`.
+//! Keybinding cheatsheet data, parsed from the embedded `keybinds.toml`.
 //!
-//! `docs/KEYBINDS.toml` is the documented single source of truth for keybindings.
-//! It is embedded at compile time so the `:Keymaps` picker ships in the binary.
+//! `src/finder/keybinds.toml` documents Nevi's built-in default keybindings,
+//! embedded at compile time so the `:Keymaps` picker ships in the binary. At
+//! runtime, commands and leader/remaps are overlaid from live sources.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use super::FinderItem;
+use crate::config::{KeymapEntry, KeymapSettings, LeaderMapping};
 
 /// Raw entry as stored in KEYBINDS.toml. Mode + category come from the table path.
 #[derive(Debug, Clone, Deserialize)]
@@ -94,7 +96,7 @@ fn make_entry(mode: &str, category: &str, b: RawKeybind) -> KeybindEntry {
 
 /// Load and parse the embedded KEYBINDS.toml.
 pub fn load_keybinds() -> Vec<KeybindEntry> {
-    const RAW: &str = include_str!("../../docs/KEYBINDS.toml");
+    const RAW: &str = include_str!("keybinds.toml");
     parse_keybinds(RAW)
 }
 
@@ -125,19 +127,145 @@ pub fn display_row(entry: &KeybindEntry) -> String {
     format!("{:<7} {:<18} {}", mode_tag(&entry.mode), key, entry.desc)
 }
 
-/// Build finder items for every *implemented* keybinding.
-pub fn keymap_finder_items() -> Vec<FinderItem> {
-    keymap_items_from(load_keybinds())
+/// Build the finder rows for the `:Keymaps` cheatsheet, merging live sources so
+/// it reflects the editor's actual behavior:
+/// - raw built-in keys from the embedded KEYBINDS.toml (the only place they
+///   live), minus any the user has remapped;
+/// - the user's own normal/visual/insert remaps, from `keymap`;
+/// - command-line UX mappings from `keymap.command_mappings`;
+/// - commands from the live `COMMAND_SPECS` registry;
+/// - leader bindings from `keymap.leader_mappings` (the active, merged set).
+///
+/// Everything except the raw built-ins comes from runtime sources, so it never
+/// drifts from what the editor does. `keymap` is the editor's active keymap
+/// (`settings.keymap`).
+pub fn keymap_finder_items(keymap: &KeymapSettings) -> Vec<FinderItem> {
+    // Drop built-in rows the user has remapped; show their remap instead.
+    let mut entries: Vec<KeybindEntry> = raw_key_entries()
+        .into_iter()
+        .filter(|entry| !is_remapped(keymap, &entry.mode, &entry.key))
+        .collect();
+    entries.extend(remap_entries(keymap));
+    entries.extend(command_mode_entries(keymap));
+    entries.extend(command_entries());
+    entries.extend(leader_entries(&keymap.leader_mappings));
+    entries.iter().map(entry_to_item).collect()
 }
 
-/// Filter to implemented entries and render each as an inert finder item
-/// (empty path, no buffer/terminal/git metadata) so Enter has nothing to act on.
-fn keymap_items_from(entries: Vec<KeybindEntry>) -> Vec<FinderItem> {
+/// True if the user has remapped `key` in the given mode (normal/visual/insert),
+/// so the built-in default row should be replaced by the user's remap.
+fn is_remapped(keymap: &KeymapSettings, mode: &str, key: &str) -> bool {
+    let remaps = match mode {
+        "normal" => &keymap.normal,
+        "visual" => &keymap.visual,
+        "insert" => &keymap.insert,
+        _ => return false,
+    };
+    remaps.iter().any(|entry| entry.from == key)
+}
+
+/// Rows for the user's own normal/visual/insert remaps, from the live config.
+fn remap_entries(keymap: &KeymapSettings) -> Vec<KeybindEntry> {
+    let sources: [(&str, &Vec<KeymapEntry>); 3] = [
+        ("normal", &keymap.normal),
+        ("visual", &keymap.visual),
+        ("insert", &keymap.insert),
+    ];
+    let mut entries = Vec::new();
+    for (mode, remaps) in sources {
+        for remap in remaps {
+            entries.push(KeybindEntry {
+                mode: mode.to_string(),
+                category: String::new(),
+                key: remap.from.clone(),
+                action: remap.to.clone(),
+                desc: format!("remapped to {}", remap.to),
+                status: "implemented".to_string(),
+                vim_default: false,
+            });
+        }
+    }
     entries
+}
+
+/// Implemented raw-key entries from the embedded file, excluding the `commands`
+/// and `leader` sections — those are now sourced live (registry + config) to
+/// avoid drift and duplication.
+fn raw_key_entries() -> Vec<KeybindEntry> {
+    load_keybinds()
         .into_iter()
         .filter(|entry| entry.status == "implemented")
-        .map(|entry| FinderItem::new(display_row(&entry), PathBuf::new()).with_icon("  "))
+        .filter(|entry| entry.mode != "commands" && entry.mode != "leader")
         .collect()
+}
+
+/// Command rows from the live `COMMAND_SPECS` registry.
+fn command_entries() -> Vec<KeybindEntry> {
+    crate::commands::command_cheatsheet_rows()
+        .into_iter()
+        .map(|(name, desc)| KeybindEntry {
+            mode: "commands".to_string(),
+            category: String::new(),
+            key: name,
+            action: String::new(),
+            desc,
+            status: "implemented".to_string(),
+            vim_default: false,
+        })
+        .collect()
+}
+
+/// Leader rows from the live keymap config. Falls back to the action string when
+/// a mapping carries no description (e.g. a user-defined one).
+fn leader_entries(leader_mappings: &[LeaderMapping]) -> Vec<KeybindEntry> {
+    leader_mappings
+        .iter()
+        .map(|mapping| {
+            let desc = mapping
+                .desc
+                .clone()
+                .unwrap_or_else(|| mapping.action.clone());
+            KeybindEntry {
+                mode: "leader".to_string(),
+                category: String::new(),
+                key: mapping.key.clone(),
+                action: mapping.action.clone(),
+                desc,
+                status: "implemented".to_string(),
+                vim_default: false,
+            }
+        })
+        .collect()
+}
+
+/// Rows for the command-line UX mappings (keys active while typing a `:`
+/// command, e.g. `<C-r>` for history), from the live config.
+fn command_mode_entries(keymap: &KeymapSettings) -> Vec<KeybindEntry> {
+    keymap
+        .command_mappings
+        .iter()
+        .map(|mapping| {
+            let desc = mapping
+                .desc
+                .clone()
+                .unwrap_or_else(|| mapping.action.clone());
+            KeybindEntry {
+                mode: "cmdline".to_string(),
+                category: String::new(),
+                key: mapping.key.clone(),
+                action: mapping.action.clone(),
+                desc,
+                status: "implemented".to_string(),
+                vim_default: false,
+            }
+        })
+        .collect()
+}
+
+/// Render one entry as an inert finder item (empty path, no metadata) so Enter
+/// has nothing to act on.
+fn entry_to_item(entry: &KeybindEntry) -> FinderItem {
+    FinderItem::new(display_row(entry), PathBuf::new()).with_icon("  ")
 }
 
 #[cfg(test)]
@@ -179,10 +307,60 @@ vim_default = true
     }
 
     #[test]
-    fn items_include_only_implemented() {
-        let items = keymap_items_from(parse_keybinds(SAMPLE));
-        // h and ff are implemented; gD is planned and excluded
-        assert_eq!(items.len(), 2);
+    fn picker_sources_commands_from_registry() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        let gitchanges = items
+            .iter()
+            .filter(|item| item.display.contains(":GitChanges"))
+            .count();
+        assert_eq!(gitchanges, 1, "exactly one :GitChanges row, from the registry");
+        // FindFiles is in both the registry and the (now-excluded) TOML commands
+        // section — it must appear exactly once, proving no duplication.
+        let findfiles = items
+            .iter()
+            .filter(|item| item.display.contains(":FindFiles"))
+            .count();
+        assert_eq!(findfiles, 1, ":FindFiles should appear once (registry only)");
+    }
+
+    #[test]
+    fn picker_sources_leader_from_config() {
+        let mut keymap = KeymapSettings::default();
+        keymap.leader_mappings = vec![LeaderMapping {
+            key: "gc".to_string(),
+            action: ":GitChanges".to_string(),
+            desc: Some("Git changes picker".to_string()),
+        }];
+        let items = keymap_finder_items(&keymap);
+        assert!(
+            items.iter().any(|item| item.display.contains("<leader>gc")),
+            "leader rows should come from the live config"
+        );
+    }
+
+    #[test]
+    fn picker_overlays_user_normal_remaps() {
+        let mut keymap = KeymapSettings::default();
+        keymap.normal = vec![KeymapEntry {
+            from: "H".to_string(),
+            to: "^".to_string(),
+        }];
+        let items = keymap_finder_items(&keymap);
+        assert!(
+            items.iter().any(|item| item.display.contains("remapped to ^")),
+            "the user's H -> ^ remap should appear in the cheatsheet"
+        );
+    }
+
+    #[test]
+    fn picker_sources_command_mode_mappings() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        assert!(
+            items
+                .iter()
+                .any(|item| item.display.contains("<C-r>") && item.display.contains("history")),
+            "command-line UX mappings (e.g. <C-r> history) should appear"
+        );
     }
 
     #[test]
