@@ -370,7 +370,11 @@ impl CopilotManager {
         }
 
         // Check if language is disabled
-        if self.settings.disabled_languages.contains(&language_id.to_string()) {
+        if self
+            .settings
+            .disabled_languages
+            .contains(&language_id.to_string())
+        {
             return Ok(());
         }
 
@@ -407,7 +411,11 @@ impl CopilotManager {
 
         debug_log(&format!(
             "REQUEST: getCompletions uri={} line={} col={} utf16_col={} source_len={}",
-            relative_path, line, col, utf16_col, source.len()
+            relative_path,
+            line,
+            col,
+            utf16_col,
+            source.len()
         ));
 
         // Send request
@@ -544,7 +552,13 @@ impl CopilotManager {
     }
 
     /// Notify that a document was opened
-    pub fn did_open(&mut self, uri: &str, language_id: &str, version: i32, text: &str) -> Result<()> {
+    pub fn did_open(
+        &mut self,
+        uri: &str,
+        language_id: &str,
+        version: i32,
+        text: &str,
+    ) -> Result<()> {
         if let Some(client) = &mut self.client {
             client.did_open(uri, language_id, version, text)?;
         }

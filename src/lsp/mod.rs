@@ -184,6 +184,36 @@ impl LspManager {
         })
     }
 
+    /// Request go-to-declaration
+    pub fn goto_declaration(
+        &self,
+        path: &PathBuf,
+        line: u32,
+        character: u32,
+    ) -> anyhow::Result<()> {
+        let uri = path_to_uri(path);
+        self.send(LspRequest::GotoDeclaration {
+            uri,
+            line,
+            character,
+        })
+    }
+
+    /// Request go-to-implementation
+    pub fn goto_implementation(
+        &self,
+        path: &PathBuf,
+        line: u32,
+        character: u32,
+    ) -> anyhow::Result<()> {
+        let uri = path_to_uri(path);
+        self.send(LspRequest::GotoImplementation {
+            uri,
+            line,
+            character,
+        })
+    }
+
     /// Request hover
     pub fn hover(&self, path: &PathBuf, line: u32, character: u32) -> anyhow::Result<()> {
         let uri = path_to_uri(path);
@@ -439,6 +469,28 @@ fn run_lsp_thread(
                         if let Err(e) = client.goto_definition(&uri, line, character) {
                             let _ = notification_tx.send(LspNotification::Error {
                                 message: format!("Failed to request definition: {}", e),
+                            });
+                        }
+                    }
+                    LspRequest::GotoDeclaration {
+                        uri,
+                        line,
+                        character,
+                    } => {
+                        if let Err(e) = client.goto_declaration(&uri, line, character) {
+                            let _ = notification_tx.send(LspNotification::Error {
+                                message: format!("Failed to request declaration: {}", e),
+                            });
+                        }
+                    }
+                    LspRequest::GotoImplementation {
+                        uri,
+                        line,
+                        character,
+                    } => {
+                        if let Err(e) = client.goto_implementation(&uri, line, character) {
+                            let _ = notification_tx.send(LspNotification::Error {
+                                message: format!("Failed to request implementation: {}", e),
                             });
                         }
                     }

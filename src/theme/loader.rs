@@ -200,26 +200,30 @@ fn parse_hex_color(s: &str) -> Option<Color> {
 }
 
 /// Parse a style from TOML
-fn parse_style(style_toml: &Option<StyleToml>, palette: &HashMap<String, String>, default: StyleDef) -> StyleDef {
+fn parse_style(
+    style_toml: &Option<StyleToml>,
+    palette: &HashMap<String, String>,
+    default: StyleDef,
+) -> StyleDef {
     match style_toml {
-        Some(s) => {
-            StyleDef {
-                fg: s.fg.as_ref()
-                    .and_then(|v| resolve_color(v, palette))
-                    .unwrap_or(default.fg),
-                bg: s.bg.as_ref().and_then(|v| resolve_color(v, palette)),
-                bold: s.bold,
-                italic: s.italic,
-            }
-        }
+        Some(s) => StyleDef {
+            fg: s
+                .fg
+                .as_ref()
+                .and_then(|v| resolve_color(v, palette))
+                .unwrap_or(default.fg),
+            bg: s.bg.as_ref().and_then(|v| resolve_color(v, palette)),
+            bold: s.bold,
+            italic: s.italic,
+        },
         None => default,
     }
 }
 
 /// Load a theme from TOML content (returns Result for error reporting)
 pub fn try_load_theme_from_toml(name: &str, content: &str) -> Result<Theme, String> {
-    let toml: ThemeToml = toml::from_str(content)
-        .map_err(|e| format!("Theme '{}': {}", name, e))?;
+    let toml: ThemeToml =
+        toml::from_str(content).map_err(|e| format!("Theme '{}': {}", name, e))?;
     Ok(load_theme_from_toml_inner(name, &toml))
 }
 
@@ -263,149 +267,307 @@ fn load_theme_from_toml_inner(name: &str, toml: &ThemeToml) -> Theme {
 
     // Parse UI colors
     let ui = UiColors {
-        background: toml.ui.background.as_ref()
+        background: toml
+            .ui
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.background),
-        foreground: toml.ui.foreground.as_ref()
+        foreground: toml
+            .ui
+            .foreground
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.foreground),
-        cursor_line: toml.ui.cursor_line.as_ref()
+        cursor_line: toml
+            .ui
+            .cursor_line
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.cursor_line),
-        selection: toml.ui.selection.as_ref()
+        selection: toml
+            .ui
+            .selection
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.selection),
-        line_number: toml.ui.line_number.as_ref()
+        line_number: toml
+            .ui
+            .line_number
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.line_number),
-        line_number_active: toml.ui.line_number_active.as_ref()
+        line_number_active: toml
+            .ui
+            .line_number_active
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.line_number_active),
 
-        statusline_bg: toml.ui.statusline.background.as_ref()
+        statusline_bg: toml
+            .ui
+            .statusline
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_bg),
-        statusline_fg: toml.ui.statusline.foreground.as_ref()
+        statusline_fg: toml
+            .ui
+            .statusline
+            .foreground
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_fg),
-        statusline_mode_normal: toml.ui.statusline.mode_normal.as_ref()
+        statusline_mode_normal: toml
+            .ui
+            .statusline
+            .mode_normal
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_mode_normal),
-        statusline_mode_insert: toml.ui.statusline.mode_insert.as_ref()
+        statusline_mode_insert: toml
+            .ui
+            .statusline
+            .mode_insert
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_mode_insert),
-        statusline_mode_visual: toml.ui.statusline.mode_visual.as_ref()
+        statusline_mode_visual: toml
+            .ui
+            .statusline
+            .mode_visual
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_mode_visual),
-        statusline_mode_command: toml.ui.statusline.mode_command.as_ref()
+        statusline_mode_command: toml
+            .ui
+            .statusline
+            .mode_command
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_mode_command),
-        statusline_mode_replace: toml.ui.statusline.mode_replace.as_ref()
+        statusline_mode_replace: toml
+            .ui
+            .statusline
+            .mode_replace
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.statusline_mode_replace),
 
-        popup_bg: toml.ui.popup.background.as_ref()
+        popup_bg: toml
+            .ui
+            .popup
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.popup_bg),
-        popup_border: toml.ui.popup.border.as_ref()
+        popup_border: toml
+            .ui
+            .popup
+            .border
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.popup_border),
-        popup_selection: toml.ui.popup.selection.as_ref()
+        popup_selection: toml
+            .ui
+            .popup
+            .selection
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.popup_selection),
 
-        completion_bg: toml.ui.completion.background.as_ref()
+        completion_bg: toml
+            .ui
+            .completion
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.completion_bg),
-        completion_border: toml.ui.completion.border.as_ref()
+        completion_border: toml
+            .ui
+            .completion
+            .border
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.completion_border),
-        completion_selected: toml.ui.completion.selected.as_ref()
+        completion_selected: toml
+            .ui
+            .completion
+            .selected
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.completion_selected),
-        completion_match: toml.ui.completion.match_.as_ref()
+        completion_match: toml
+            .ui
+            .completion
+            .match_
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.completion_match),
-        completion_detail: toml.ui.completion.detail.as_ref()
+        completion_detail: toml
+            .ui
+            .completion
+            .detail
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.completion_detail),
 
-        finder_bg: toml.ui.finder.background.as_ref()
+        finder_bg: toml
+            .ui
+            .finder
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.finder_bg),
-        finder_border: toml.ui.finder.border.as_ref()
+        finder_border: toml
+            .ui
+            .finder
+            .border
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.finder_border),
-        finder_selected: toml.ui.finder.selected.as_ref()
+        finder_selected: toml
+            .ui
+            .finder
+            .selected
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.finder_selected),
-        finder_match: toml.ui.finder.match_.as_ref()
+        finder_match: toml
+            .ui
+            .finder
+            .match_
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.finder_match),
-        finder_prompt: toml.ui.finder.prompt.as_ref()
+        finder_prompt: toml
+            .ui
+            .finder
+            .prompt
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.finder_prompt),
 
-        search_match_bg: toml.ui.search.match_bg.as_ref()
+        search_match_bg: toml
+            .ui
+            .search
+            .match_bg
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.search_match_bg),
-        search_match_fg: toml.ui.search.match_fg.as_ref()
+        search_match_fg: toml
+            .ui
+            .search
+            .match_fg
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.search_match_fg),
 
-        visual_bg: toml.ui.visual_bg.as_ref()
+        visual_bg: toml
+            .ui
+            .visual_bg
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.visual_bg),
 
-        explorer_bg: toml.ui.explorer.background.as_ref()
+        explorer_bg: toml
+            .ui
+            .explorer
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.explorer_bg),
-        explorer_border: toml.ui.explorer.border.as_ref()
+        explorer_border: toml
+            .ui
+            .explorer
+            .border
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.explorer_border),
-        explorer_selected: toml.ui.explorer.selected.as_ref()
+        explorer_selected: toml
+            .ui
+            .explorer
+            .selected
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.explorer_selected),
-        explorer_directory: toml.ui.explorer.directory.as_ref()
+        explorer_directory: toml
+            .ui
+            .explorer
+            .directory
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.explorer_directory),
 
-        harpoon_bg: toml.ui.harpoon.background.as_ref()
+        harpoon_bg: toml
+            .ui
+            .harpoon
+            .background
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.harpoon_bg),
-        harpoon_border: toml.ui.harpoon.border.as_ref()
+        harpoon_border: toml
+            .ui
+            .harpoon
+            .border
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.harpoon_border),
-        harpoon_selected: toml.ui.harpoon.selected.as_ref()
+        harpoon_selected: toml
+            .ui
+            .harpoon
+            .selected
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.ui.harpoon_selected),
     };
 
     // Parse diagnostic colors
     let diagnostic = DiagnosticColors {
-        error: toml.diagnostic.error.as_ref()
+        error: toml
+            .diagnostic
+            .error
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.diagnostic.error),
-        warning: toml.diagnostic.warning.as_ref()
+        warning: toml
+            .diagnostic
+            .warning
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.diagnostic.warning),
-        info: toml.diagnostic.info.as_ref()
+        info: toml
+            .diagnostic
+            .info
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.diagnostic.info),
-        hint: toml.diagnostic.hint.as_ref()
+        hint: toml
+            .diagnostic
+            .hint
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.diagnostic.hint),
     };
 
     // Parse git colors
     let git = GitColors {
-        added: toml.git.added.as_ref()
+        added: toml
+            .git
+            .added
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.git.added),
-        modified: toml.git.modified.as_ref()
+        modified: toml
+            .git
+            .modified
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.git.modified),
-        deleted: toml.git.deleted.as_ref()
+        deleted: toml
+            .git
+            .deleted
+            .as_ref()
             .and_then(|v| resolve_color(v, palette))
             .unwrap_or(base.git.deleted),
     };
@@ -444,12 +606,10 @@ pub fn load_user_themes() -> (Vec<Theme>, Vec<String>) {
             if path.extension().map(|e| e == "toml").unwrap_or(false) {
                 if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                     match std::fs::read_to_string(&path) {
-                        Ok(content) => {
-                            match try_load_theme_from_toml(name, &content) {
-                                Ok(theme) => themes.push(theme),
-                                Err(e) => errors.push(e),
-                            }
-                        }
+                        Ok(content) => match try_load_theme_from_toml(name, &content) {
+                            Ok(theme) => themes.push(theme),
+                            Err(e) => errors.push(e),
+                        },
                         Err(e) => {
                             errors.push(format!("Theme '{}': failed to read file: {}", name, e));
                         }

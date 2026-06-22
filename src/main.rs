@@ -575,6 +575,12 @@ fn main() -> anyhow::Result<()> {
                                         LspAction::GotoDefinition => {
                                             let _ = mlsp.goto_definition(&path, line, col);
                                         }
+                                        LspAction::GotoDeclaration => {
+                                            let _ = mlsp.goto_declaration(&path, line, col);
+                                        }
+                                        LspAction::GotoImplementation => {
+                                            let _ = mlsp.goto_implementation(&path, line, col);
+                                        }
                                         LspAction::Hover => {
                                             let _ = mlsp.hover(&path, line, col);
                                         }
@@ -1132,6 +1138,7 @@ fn main() -> anyhow::Result<()> {
                         }
                         LspNotification::Definition {
                             locations,
+                            target_kind,
                             request_uri,
                         } => {
                             // Validate response is for current file
@@ -1144,7 +1151,7 @@ fn main() -> anyhow::Result<()> {
                             // Handle go-to-definition with support for multiple locations
                             match locations.len() {
                                 0 => {
-                                    editor.set_status("No definition found");
+                                    editor.set_status(format!("No {} found", target_kind.label()));
                                 }
                                 1 => {
                                     // Single result - jump directly
@@ -1155,7 +1162,10 @@ fn main() -> anyhow::Result<()> {
                                         editor.open_file(path)?;
                                         editor.goto_line(loc.line + 1); // LSP is 0-indexed
                                         editor.cursor.col = loc.col;
-                                        editor.set_status("Jumped to definition");
+                                        editor.set_status(format!(
+                                            "Jumped to {}",
+                                            target_kind.label()
+                                        ));
                                     }
                                 }
                                 n => {
@@ -1169,7 +1179,8 @@ fn main() -> anyhow::Result<()> {
                                         editor.goto_line(loc.line + 1);
                                         editor.cursor.col = loc.col;
                                         editor.set_status(format!(
-                                            "Jumped to definition (1 of {})",
+                                            "Jumped to {} (1 of {})",
+                                            target_kind.label(),
                                             n
                                         ));
                                     }

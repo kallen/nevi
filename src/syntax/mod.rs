@@ -4,9 +4,9 @@ mod theme;
 pub use highlighter::HighlightSpan;
 pub use theme::{HighlightGroup, SyntaxStyle, Theme};
 
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use tree_sitter::{Parser, Query, Tree};
-use std::cell::{Cell, RefCell};
 
 use crate::editor::Buffer;
 
@@ -395,7 +395,8 @@ impl SyntaxManager {
             self.query = None;
             self.parse_version = buffer.version();
             self.cache_version.set(self.parse_version);
-            self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+            self.highlight_cache
+                .replace(vec![None; self.line_start_bytes.len()]);
             return;
         }
 
@@ -427,7 +428,8 @@ impl SyntaxManager {
         self.tree = self.parser.parse(&self.source_cache, None);
         self.parse_version = buffer.version();
         self.cache_version.set(self.parse_version);
-        self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+        self.highlight_cache
+            .replace(vec![None; self.line_start_bytes.len()]);
     }
 
     /// Parse string content directly (for preview panels, etc.)
@@ -450,7 +452,8 @@ impl SyntaxManager {
             self.query = None;
             self.parse_version = self.parse_version.wrapping_add(1);
             self.cache_version.set(self.parse_version);
-            self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+            self.highlight_cache
+                .replace(vec![None; self.line_start_bytes.len()]);
             return;
         }
 
@@ -482,7 +485,8 @@ impl SyntaxManager {
         self.tree = self.parser.parse(&self.source_cache, None);
         self.parse_version = self.parse_version.wrapping_add(1);
         self.cache_version.set(self.parse_version);
-        self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+        self.highlight_cache
+            .replace(vec![None; self.line_start_bytes.len()]);
     }
 
     /// Check if syntax highlighting is available
@@ -494,10 +498,12 @@ impl SyntaxManager {
     pub fn get_line_highlights(&self, line: usize) -> Vec<HighlightSpan> {
         if self.language.as_deref() == Some("yaml") {
             if self.cache_version.get() != self.parse_version {
-                self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+                self.highlight_cache
+                    .replace(vec![None; self.line_start_bytes.len()]);
                 self.cache_version.set(self.parse_version);
             } else if self.highlight_cache.borrow().len() != self.line_start_bytes.len() {
-                self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+                self.highlight_cache
+                    .replace(vec![None; self.line_start_bytes.len()]);
                 self.cache_version.set(self.parse_version);
             }
 
@@ -525,10 +531,12 @@ impl SyntaxManager {
         match (&self.tree, &self.query) {
             (Some(tree), Some(query)) => {
                 if self.cache_version.get() != self.parse_version {
-                    self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+                    self.highlight_cache
+                        .replace(vec![None; self.line_start_bytes.len()]);
                     self.cache_version.set(self.parse_version);
                 } else if self.highlight_cache.borrow().len() != self.line_start_bytes.len() {
-                    self.highlight_cache.replace(vec![None; self.line_start_bytes.len()]);
+                    self.highlight_cache
+                        .replace(vec![None; self.line_start_bytes.len()]);
                     self.cache_version.set(self.parse_version);
                 }
 
@@ -591,7 +599,8 @@ impl SyntaxManager {
         let line_start = self.line_start_bytes[line];
 
         // Get the line content and convert character offset to byte offset
-        let line_end = self.line_start_bytes
+        let line_end = self
+            .line_start_bytes
             .get(line + 1)
             .copied()
             .unwrap_or(self.source_cache.len());
@@ -644,9 +653,9 @@ pub fn get_comment_string(language: Option<&str>) -> &'static str {
     match language {
         Some("rust") => "// ",
         Some("javascript") | Some("typescript") | Some("tsx") => "// ",
-        Some("css") | Some("scss") => "/* ",  // CSS only has block comments, but we use line-style
-        Some("json") => "// ",  // JSON doesn't support comments, but some tools allow //
-        Some("markdown") => "<!-- ",  // HTML-style for markdown
+        Some("css") | Some("scss") => "/* ", // CSS only has block comments, but we use line-style
+        Some("json") => "// ", // JSON doesn't support comments, but some tools allow //
+        Some("markdown") => "<!-- ", // HTML-style for markdown
         Some("python") => "# ",
         Some("bash") | Some("shell") => "# ",
         Some("lua") => "-- ",
@@ -654,7 +663,7 @@ pub fn get_comment_string(language: Option<&str>) -> &'static str {
         Some("go") | Some("c") | Some("cpp") | Some("java") | Some("swift") => "// ",
         Some("ruby") | Some("perl") => "# ",
         Some("html") | Some("xml") => "<!-- ",
-        _ => "// ",  // Default fallback
+        _ => "// ", // Default fallback
     }
 }
 

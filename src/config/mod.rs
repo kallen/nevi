@@ -9,7 +9,7 @@ pub mod languages;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-pub use keymap::{CommandModeAction, KeymapLookup, LeaderAction};
+pub use keymap::{CommandModeAction, KeymapLookup, LeaderAction, LeaderHint};
 pub use languages::{load_languages_config, FormatterConfig, LanguageConfig, LanguagesConfig};
 
 /// Main settings structure
@@ -182,6 +182,8 @@ pub struct KeymapSettings {
     /// When a sequence matches both an exact mapping AND is a prefix of longer mappings,
     /// wait this long before executing the shorter match.
     pub timeoutlen: u64,
+    /// Show available leader-key continuations while a leader sequence is active.
+    pub show_leader_popup: bool,
     /// Normal mode key remappings
     pub normal: Vec<KeymapEntry>,
     /// Visual mode key remappings
@@ -199,6 +201,7 @@ impl Default for KeymapSettings {
         Self {
             leader: " ".to_string(), // Space as leader (common in Neovim)
             timeoutlen: 1000,        // 1 second (matches Vim default)
+            show_leader_popup: true,
             normal: Vec::new(),
             visual: Vec::new(),
             insert: Vec::new(),
@@ -688,7 +691,7 @@ pub fn config_path() -> Option<PathBuf> {
 /// Template config file with comments explaining all options
 /// This is generated when no config file exists
 fn default_config_template() -> &'static str {
-    r#"# Nevi Configuration
+    r##"# Nevi Configuration
 # This file is for overriding default settings.
 # All vim/neovim keybindings work out of the box - you don't need to configure them here.
 # Only add settings you want to change from the defaults.
@@ -775,6 +778,7 @@ fn default_config_template() -> &'static str {
 #                            # of longer mappings (e.g., <leader>e and <leader>ee), wait this
 #                            # long before executing the shorter match. Set to 0 for immediate
 #                            # execution (disables overlapping mapping support).
+# show_leader_popup = true   # Show available <leader> continuations while typing a leader mapping
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - Movement
@@ -787,11 +791,15 @@ fn default_config_template() -> &'static str {
 # 0                - Move to start of line
 # ^                - Move to first non-blank character
 # $                - Move to end of line
+# +/-              - Move to first non-blank of next/previous line
 # gg               - Move to start of file
 # G                - Move to end of file (or line N with count)
 # {/}              - Move to previous/next paragraph
+# ( and )          - Move to previous/next sentence
 # %                - Jump to matching bracket
 # H/M/L            - Move to top/middle/bottom of screen
+# gj/gk            - Move down/up by display line when wrapping
+# g0/g$/g^         - Start/end/first non-blank of display line
 # f{char}/F{char}  - Find character forward/backward
 # t{char}/T{char}  - Move till character forward/backward
 # ;/,              - Repeat last f/F/t/T / in reverse
@@ -808,12 +816,15 @@ fn default_config_template() -> &'static str {
 # ----------------------------------------------------------------------------
 # Ctrl+o           - Jump to older position in jump list
 # Ctrl+i           - Jump to newer position in jump list
+# ''/``            - Jump to line/exact position before last jump
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - Change List
 # ----------------------------------------------------------------------------
 # g;               - Jump to older change position (where you edited)
 # g,               - Jump to newer change position
+# '. and `.        - Jump to line/exact position of last change
+# '^ and `^        - Jump to line/exact position of last insert
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - Editing
@@ -822,6 +833,7 @@ fn default_config_template() -> &'static str {
 # c{motion}/cc/C   - Change with motion / line / to end
 # y{motion}/yy/Y   - Yank with motion / line / line
 # p/P              - Paste after/before cursor (supports count)
+# gp/gP            - Paste after/before and leave cursor after pasted text
 # x/X              - Delete char under/before cursor (supports count)
 # r{char}          - Replace character (supports count)
 # J                - Join lines with space (supports count)
@@ -836,6 +848,7 @@ fn default_config_template() -> &'static str {
 # <<               - Dedent current line
 # >{motion}        - Indent with motion
 # <{motion}        - Dedent with motion
+# ==/={motion}     - Auto-indent current line / motion range
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - Case
@@ -872,11 +885,16 @@ fn default_config_template() -> &'static str {
 # n/N              - Next/previous search match
 # *                - Search word under cursor forward
 # #                - Search word under cursor backward
+# gn/gN            - Select next/previous search match
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - LSP
 # ----------------------------------------------------------------------------
 # gd               - Go to definition
+# gD               - Go to declaration
+# gI               - Go to implementation
+# gf               - Open file under cursor
+# gx               - Open URL under cursor
 # gr               - Find references
 # K                - Show hover documentation
 # gl               - Show diagnostic in float
@@ -922,6 +940,9 @@ fn default_config_template() -> &'static str {
 # Ctrl+w w/W       - Next/previous window
 # Ctrl+w h/j/k/l   - Move to window left/down/up/right
 # Ctrl+h/j/k/l     - Move directly to window left/down/up/right
+# Ctrl+w =         - Make all windows equal size
+# Ctrl+w r/R       - Rotate windows down-right / up-left
+# Ctrl+w x         - Exchange current window with next
 #
 # ----------------------------------------------------------------------------
 # NORMAL MODE - Harpoon
@@ -937,6 +958,10 @@ fn default_config_template() -> &'static str {
 # Tab              - Insert tab/spaces
 # Ctrl+w           - Delete word before cursor
 # Ctrl+u           - Delete to start of line
+# Ctrl+t/Ctrl+d    - Increase/decrease indent of current line
+# Ctrl+a           - Insert previously inserted text
+# Ctrl+r {reg}     - Insert contents of register
+# Ctrl+o           - Execute one normal-mode command, then return to insert
 # Ctrl+l           - Accept Copilot suggestion
 # Alt+]/Alt+[      - Next/previous Copilot suggestion
 #
@@ -947,6 +972,7 @@ fn default_config_template() -> &'static str {
 # d/c/y            - Delete/change/yank selection
 # p                - Paste over selection
 # o                - Swap selection end
+# O                - Swap to other corner in visual block mode
 # >/<              - Indent/dedent selection
 # gc               - Toggle comment
 # S{char}          - Surround selection
@@ -963,6 +989,9 @@ fn default_config_template() -> &'static str {
 # i{/a{ or iB/aB   - Inner/around braces
 # i[/a[            - Inner/around brackets
 # i</a<            - Inner/around angle brackets
+# ip/ap            - Inner/around paragraph
+# is/as            - Inner/around sentence
+# it/at            - Inner/around HTML/XML tag
 #
 # ----------------------------------------------------------------------------
 # REGISTERS (prefix with ")
@@ -973,6 +1002,10 @@ fn default_config_template() -> &'static str {
 # "*               - Selection clipboard
 # "_               - Black hole (discard)
 # "0               - Last yank
+# ".               - Last inserted text
+# "%               - Current filename
+# ":               - Last command
+# "#               - Alternate filename
 #
 # ----------------------------------------------------------------------------
 # LEADER MAPPINGS (default: Space)
@@ -986,6 +1019,7 @@ fn default_config_template() -> &'static str {
 # <leader>fb       - Find buffers
 # <leader>ft       - Theme picker
 # <leader>tt       - Terminal picker
+# <leader>fk       - Search keymaps
 #
 # Floating terminal:
 # Ctrl+\           - Toggle active terminal
@@ -1116,7 +1150,7 @@ fn default_config_template() -> &'static str {
 # auto_trigger = true        # Auto-trigger in insert mode
 # hide_during_completion = true  # Hide when LSP popup visible
 # disabled_languages = []    # Languages where Copilot is disabled
-"#
+"##
 }
 
 /// Ensure config directory and template file exist
@@ -1315,6 +1349,21 @@ mod tests {
             settings.lsp.servers.rust.preset,
             Some(LspPreset::RustAnalyzer)
         );
+    }
+
+    #[test]
+    fn keymap_leader_popup_is_enabled_by_default_and_configurable() {
+        assert!(KeymapSettings::default().show_leader_popup);
+
+        let settings: Settings = toml::from_str(
+            r#"
+            [keymap]
+            show_leader_popup = false
+            "#,
+        )
+        .expect("parse settings");
+
+        assert!(!settings.keymap.show_leader_popup);
     }
 }
 

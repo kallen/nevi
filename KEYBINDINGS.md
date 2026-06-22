@@ -15,6 +15,13 @@ The leader key is `Space` by default. To change it:
 leader = ","  # Use comma as leader instead
 ```
 
+To disable the leader popup while keeping leader mappings active:
+
+```toml
+[keymap]
+show_leader_popup = false
+```
+
 ### Remapping Keys in Normal Mode
 
 Want `H` to go to the start of the line and `L` to go to the end? Add this:
@@ -147,8 +154,17 @@ When specifying keys, use these formats:
 | `0` | Move to start of line (column 0) |
 | `^` | Move to first non-blank character |
 | `$` | Move to end of line |
+| `+` | Move to first non-blank of next line |
+| `-` | Move to first non-blank of previous line |
+| `gj` | Move down by display line when wrap is enabled |
+| `gk` | Move up by display line when wrap is enabled |
+| `g0` | Move to start of display line when wrap is enabled |
+| `g$` | Move to end of display line when wrap is enabled |
+| `g^` | Move to first non-blank of display line when wrap is enabled |
 | `{` | Move to previous blank line (paragraph) |
 | `}` | Move to next blank line (paragraph) |
+| `(` | Move to previous sentence |
+| `)` | Move to next sentence |
 
 ### File Movement
 
@@ -200,6 +216,8 @@ Nevi tracks where you jump from, so you can navigate back and forth.
 |-----|--------|
 | `Ctrl+o` | Jump to older position |
 | `Ctrl+i` | Jump to newer position |
+| `''` | Jump to the line before the last jump |
+| <code>``</code> | Jump to the exact position before the last jump |
 
 ### Change List
 
@@ -209,6 +227,10 @@ Navigate through positions where you made edits.
 |-----|--------|
 | `g;` | Jump to older change position |
 | `g,` | Jump to newer change position |
+| `'.` | Jump to the line of the last change |
+| <code>`.</code> | Jump to the exact position of the last change |
+| `'^` | Jump to the line of the last insert |
+| <code>`^</code> | Jump to the exact position of the last insert |
 | `gi` | Go to last insert position and enter insert mode |
 
 ---
@@ -226,6 +248,7 @@ Operators are commands that wait for a motion. For example, `d` (delete) + `w` (
 | `y` | Yank (copy) |
 | `>` | Indent right |
 | `<` | Indent left |
+| `=` | Auto-indent |
 | `gu` | Lowercase |
 | `gU` | Uppercase |
 | `g~` | Toggle case |
@@ -246,6 +269,8 @@ Operators are commands that wait for a motion. For example, `d` (delete) + `w` (
 | `S` / `{n}S` | Substitute entire line(s) |
 | `p` / `{n}p` | Paste after cursor |
 | `P` / `{n}P` | Paste before cursor |
+| `gp` / `{n}gp` | Paste after and leave cursor after pasted text |
+| `gP` / `{n}gP` | Paste before and leave cursor after pasted text |
 | `r{char}` / `{n}r{char}` | Replace character(s) under cursor |
 | `.` | Repeat last change |
 
@@ -271,6 +296,8 @@ Operators are commands that wait for a motion. For example, `d` (delete) + `w` (
 | `<<` | Dedent current line |
 | `>{motion}` | Indent with motion (e.g., `>j` indents current and next line) |
 | `<{motion}` | Dedent with motion |
+| `==` | Auto-indent current line |
+| `={motion}` | Auto-indent with motion |
 
 ### Case
 
@@ -303,6 +330,8 @@ Operators are commands that wait for a motion. For example, `d` (delete) + `w` (
 | `N` | Go to previous match |
 | `*` | Search word under cursor forward |
 | `#` | Search word under cursor backward |
+| `gn` | Search forward and select match |
+| `gN` | Search backward and select match |
 
 > **Tip:** Search supports regex. Use `\c` at the start for case-insensitive search (e.g., `/\cfoo`).
 
@@ -367,6 +396,11 @@ Record and replay sequences of commands.
 | `Backspace` | Delete character before cursor |
 | `Ctrl+w` | Delete word before cursor |
 | `Ctrl+u` | Delete to start of line |
+| `Ctrl+t` | Increase indent of current line |
+| `Ctrl+d` | Decrease indent of current line |
+| `Ctrl+a` | Insert previously inserted text |
+| `Ctrl+r {reg}` | Insert contents of register |
+| `Ctrl+o` | Run one normal-mode command, then return to insert |
 
 **Copilot (if enabled):**
 
@@ -396,6 +430,7 @@ Record and replay sequences of commands.
 | `y` | Yank selection |
 | `p` | Paste over selection |
 | `o` | Swap to other end of selection |
+| `O` | Swap to other corner in visual block mode |
 | `>` | Indent selection |
 | `<` | Dedent selection |
 | `gc` | Toggle comment on selection |
@@ -425,6 +460,9 @@ Text objects define regions of text. Use them with operators (`d`, `c`, `y`, etc
 | `iB` / `aB` | Inner/around braces (alias) |
 | `i[` / `a[` | Inner/around brackets |
 | `i<` / `a<` | Inner/around angle brackets |
+| `ip` / `ap` | Inner/around paragraph |
+| `is` / `as` | Inner/around sentence |
+| `it` / `at` | Inner/around HTML/XML tag |
 
 > **Examples:**
 > - `ci"` - Change inside double quotes
@@ -445,6 +483,10 @@ Registers are like named clipboards. Prefix operations with `"{register}`.
 | `"*` | Selection clipboard (same as `+` on macOS) |
 | `"_` | Black hole (delete without saving) |
 | `"0` | Last yank |
+| `".` | Last inserted text |
+| `"%` | Current filename |
+| `":` | Last command |
+| `"#` | Alternate filename |
 
 > **Examples:**
 > - `"ayy` - Yank line into register `a`
@@ -462,6 +504,10 @@ Language Server Protocol features for code intelligence.
 | Key | Action |
 |-----|--------|
 | `gd` | Go to definition |
+| `gD` | Go to declaration |
+| `gI` | Go to implementation |
+| `gf` | Open file under cursor |
+| `gx` | Open URL under cursor |
 | `gr` | Find references |
 | `K` | Show hover documentation |
 | `gl` | Show diagnostic in floating window |
@@ -539,6 +585,10 @@ Split and navigate between windows.
 | `Ctrl+w j` | Move to window below |
 | `Ctrl+w k` | Move to window above |
 | `Ctrl+w l` | Move to window on the right |
+| `Ctrl+w =` | Make all windows equal size |
+| `Ctrl+w r` | Rotate windows down/right |
+| `Ctrl+w R` | Rotate windows up/left |
+| `Ctrl+w x` | Exchange current window with next |
 | `Ctrl+h` / `Ctrl+j` / `Ctrl+k` / `Ctrl+l` | Move directly to neighboring windows |
 
 > **Note:** Currently all splits share the same orientation (all vertical OR all horizontal). Mixed layouts like having one vertical split with a horizontal split inside it are not yet supported.
@@ -548,6 +598,8 @@ Split and navigate between windows.
 ## Leader Key Mappings
 
 The leader key is `Space` by default. Press `Space` followed by these keys:
+Press `Space` by itself to show available continuations, keep typing to narrow
+the popup, or press `Esc` to cancel.
 
 ### Files & Navigation (Telescope-like)
 
@@ -623,6 +675,8 @@ When a finder popup is open (file finder, grep, buffers, etc.):
 | `Esc` | Switch to normal mode |
 | `Ctrl+c` | Close finder |
 | `Ctrl+t` | Toggle preview panel |
+| `Ctrl+d` | Scroll preview down |
+| `Ctrl+u` | Scroll preview up |
 
 ### Normal Mode (navigating results)
 
@@ -635,6 +689,8 @@ When a finder popup is open (file finder, grep, buffers, etc.):
 | `Esc` / `Ctrl+[` / `Ctrl+c` | Close finder |
 | `i` | Enter insert mode |
 | `p` | Toggle preview |
+| `Ctrl+d` | Scroll preview down |
+| `Ctrl+u` | Scroll preview up |
 
 ### Harpoon/Marks Finder Actions
 
@@ -734,6 +790,8 @@ Type `:` to enter command mode. Implemented commands include:
 |---------|--------|
 | `:bn` | Next buffer |
 | `:bp` | Previous buffer |
+| `:bd` / `:bdelete` | Close current buffer (fails if unsaved) |
+| `:bd!` / `:bdelete!` | Force close current buffer |
 
 ### Splits
 

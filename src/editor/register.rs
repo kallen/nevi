@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use arboard::Clipboard;
+use std::collections::HashMap;
 
 /// Type of register content
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,9 +59,7 @@ impl Registers {
         match name {
             None | Some('"') => self.unnamed.as_ref(),
             Some('-') => self.small_delete.as_ref(),
-            Some(c @ 'a'..='z') | Some(c @ 'A'..='Z') => {
-                self.named.get(&c.to_ascii_lowercase())
-            }
+            Some(c @ 'a'..='z') | Some(c @ 'A'..='Z') => self.named.get(&c.to_ascii_lowercase()),
             Some(c @ '1'..='9') => {
                 let idx = c.to_digit(10).unwrap() as usize - 1;
                 self.numbered[idx].as_ref()

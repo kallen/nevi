@@ -33,6 +33,8 @@ pub enum Command {
     Next,
     /// :N or :prev - Go to previous buffer
     Prev,
+    /// :bd or :bdelete - Close the current buffer
+    BufferDelete(bool),
     /// :set option[=value] - Set an option
     Set(String, Option<String>),
     /// :[number] - Go to line number
@@ -276,6 +278,18 @@ const COMMAND_SPECS: &[CommandSpec] = &[
         command: "N",
         aliases: &["prev", "previous", "bp", "bprev", "bprevious"],
         description: "Go to previous buffer",
+        takes_args: false,
+    },
+    CommandSpec {
+        command: "bd",
+        aliases: &["bdelete"],
+        description: "Delete current buffer",
+        takes_args: false,
+    },
+    CommandSpec {
+        command: "bd!",
+        aliases: &["bdelete!"],
+        description: "Force delete current buffer",
         takes_args: false,
     },
     CommandSpec {
@@ -832,6 +846,8 @@ pub fn parse_command(input: &str) -> Command {
         // Buffer navigation
         "n" | "next" | "bn" | "bnext" => Command::Next,
         "N" | "prev" | "previous" | "bp" | "bprev" | "bprevious" => Command::Prev,
+        "bd" | "bdelete" => Command::BufferDelete(false),
+        "bd!" | "bdelete!" => Command::BufferDelete(true),
 
         // Set options
         "set" => {
@@ -1535,6 +1551,20 @@ mod tests {
         assert!(matches!(parse_command("Keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keymaps"), Command::Keymaps));
         assert!(matches!(parse_command("keys"), Command::Keymaps));
+    }
+
+    #[test]
+    fn parses_buffer_delete_commands() {
+        assert!(matches!(parse_command("bd"), Command::BufferDelete(false)));
+        assert!(matches!(
+            parse_command("bdelete"),
+            Command::BufferDelete(false)
+        ));
+        assert!(matches!(parse_command("bd!"), Command::BufferDelete(true)));
+        assert!(matches!(
+            parse_command("bdelete!"),
+            Command::BufferDelete(true)
+        ));
     }
 
     #[test]

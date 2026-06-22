@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
+use lsp_types::request::{GotoDeclarationParams, GotoImplementationParams};
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, GotoDefinitionParams, HoverParams, InitializeParams,
@@ -22,7 +23,8 @@ use serde_json::{json, Value};
 
 use super::types::{
     CodeActionItem, CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity, Location,
-    LspNotification, ParameterInfo, RequestKind, SignatureHelpResult, SignatureInfo, TextEdit,
+    LspNavigationTargetKind, LspNotification, ParameterInfo, RequestKind, SignatureHelpResult,
+    SignatureInfo, TextEdit,
 };
 #[cfg(test)]
 use super::watched_files::WATCHED_FILES_METHOD;
@@ -147,6 +149,14 @@ fn client_capabilities() -> ClientCapabilities {
                 ..Default::default()
             }),
             definition: Some(lsp_types::GotoCapability {
+                link_support: Some(false),
+                ..Default::default()
+            }),
+            declaration: Some(lsp_types::GotoCapability {
+                link_support: Some(false),
+                ..Default::default()
+            }),
+            implementation: Some(lsp_types::GotoCapability {
                 link_support: Some(false),
                 ..Default::default()
             }),
@@ -393,6 +403,52 @@ impl LspClient {
             "textDocument/definition",
             serde_json::to_value(params)?,
             RequestKind::Definition {
+                uri: uri.to_string(),
+                line,
+                character,
+            },
+        )
+    }
+
+    /// Request go-to-declaration
+    pub fn goto_declaration(&mut self, uri: &str, line: u32, character: u32) -> Result<u64> {
+        let params = GotoDeclarationParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: lsp_types::Url::parse(uri)?,
+                },
+                position: lsp_types::Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        self.send_request(
+            "textDocument/declaration",
+            serde_json::to_value(params)?,
+            RequestKind::Declaration {
+                uri: uri.to_string(),
+                line,
+                character,
+            },
+        )
+    }
+
+    /// Request go-to-implementation
+    pub fn goto_implementation(&mut self, uri: &str, line: u32, character: u32) -> Result<u64> {
+        let params = GotoImplementationParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: lsp_types::Url::parse(uri)?,
+                },
+                position: lsp_types::Position { line, character },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        self.send_request(
+            "textDocument/implementation",
+            serde_json::to_value(params)?,
+            RequestKind::Implementation {
                 uri: uri.to_string(),
                 line,
                 character,
@@ -909,9 +965,40 @@ fn handle_message(
             line: _,
             character: _,
         } => match msg.result {
-            Some(result) if !result.is_null() => handle_definition_response(result, uri),
+            Some(result) if !result.is_null() => {
+                handle_definition_response(result, uri, LspNavigationTargetKind::Definition)
+            }
             _ => Some(LspNotification::Definition {
                 locations: vec![],
+                target_kind: LspNavigationTargetKind::Definition,
+                request_uri: uri,
+            }),
+        },
+        RequestKind::Declaration {
+            uri,
+            line: _,
+            character: _,
+        } => match msg.result {
+            Some(result) if !result.is_null() => {
+                handle_definition_response(result, uri, LspNavigationTargetKind::Declaration)
+            }
+            _ => Some(LspNotification::Definition {
+                locations: vec![],
+                target_kind: LspNavigationTargetKind::Declaration,
+                request_uri: uri,
+            }),
+        },
+        RequestKind::Implementation {
+            uri,
+            line: _,
+            character: _,
+        } => match msg.result {
+            Some(result) if !result.is_null() => {
+                handle_definition_response(result, uri, LspNavigationTargetKind::Implementation)
+            }
+            _ => Some(LspNotification::Definition {
+                locations: vec![],
+                target_kind: LspNavigationTargetKind::Implementation,
                 request_uri: uri,
             }),
         },
@@ -1507,7 +1594,11 @@ fn handle_completion_response(
 }
 
 /// Handle definition response - returns all locations for multi-definition support
-fn handle_definition_response(result: Value, request_uri: String) -> Option<LspNotification> {
+fn handle_definition_response(
+    result: Value,
+    request_uri: String,
+    target_kind: LspNavigationTargetKind,
+) -> Option<LspNotification> {
     // Can be a single Location, array of Locations, or array of LocationLinks
     let locations_json = if result.is_array() {
         result.as_array()?.clone()
@@ -1536,6 +1627,7 @@ fn handle_definition_response(result: Value, request_uri: String) -> Option<LspN
 
     Some(LspNotification::Definition {
         locations,
+        target_kind,
         request_uri,
     })
 }
@@ -2130,6 +2222,80 @@ mod tests {
         assert!(register_response.contains("\"result\":null"));
         assert!(unregister_response.contains("\"result\":null"));
         assert!(command_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn declaration_response_notification_preserves_navigation_kind() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            42,
+            RequestKind::Declaration {
+                uri: "file:///tmp/source.rs".to_string(),
+                line: 3,
+                character: 7,
+            },
+        );
+
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::Num(42)),
+            result: Some(json!({
+                "uri": "file:///tmp/target.rs",
+                "range": {
+                    "start": {"line": 1, "character": 2},
+                    "end": {"line": 1, "character": 6}
+                }
+            })),
+            error: None,
+            method: None,
+            params: None,
+        };
+
+        let (notification, server_response) = handle_message(response, &pending, None);
+
+        assert!(server_response.is_none());
+        let notification = notification.expect("declaration notification");
+        assert!(
+            format!("{notification:?}").contains("Declaration"),
+            "expected declaration kind in notification, got {notification:?}"
+        );
+    }
+
+    #[test]
+    fn implementation_response_notification_preserves_navigation_kind() {
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(
+            42,
+            RequestKind::Implementation {
+                uri: "file:///tmp/source.rs".to_string(),
+                line: 3,
+                character: 7,
+            },
+        );
+
+        let response = JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(JsonRpcId::Num(42)),
+            result: Some(json!({
+                "uri": "file:///tmp/target.rs",
+                "range": {
+                    "start": {"line": 1, "character": 2},
+                    "end": {"line": 1, "character": 6}
+                }
+            })),
+            error: None,
+            method: None,
+            params: None,
+        };
+
+        let (notification, server_response) = handle_message(response, &pending, None);
+
+        assert!(server_response.is_none());
+        let notification = notification.expect("implementation notification");
+        assert!(
+            format!("{notification:?}").contains("Implementation"),
+            "expected implementation kind in notification, got {notification:?}"
+        );
     }
 
     #[test]

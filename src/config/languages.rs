@@ -213,15 +213,13 @@ pub fn load_languages_config() -> LanguagesConfig {
     }
 
     match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            match toml::from_str::<LanguagesConfig>(&content) {
-                Ok(config) => config,
-                Err(e) => {
-                    eprintln!("Warning: Failed to parse languages.toml: {}", e);
-                    LanguagesConfig::default()
-                }
+        Ok(content) => match toml::from_str::<LanguagesConfig>(&content) {
+            Ok(config) => config,
+            Err(e) => {
+                eprintln!("Warning: Failed to parse languages.toml: {}", e);
+                LanguagesConfig::default()
             }
-        }
+        },
         Err(e) => {
             eprintln!("Warning: Failed to read languages.toml: {}", e);
             LanguagesConfig::default()

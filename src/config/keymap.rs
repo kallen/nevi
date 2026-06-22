@@ -1,7 +1,7 @@
 //! Keymap parsing and lookup for custom key remappings
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::KeymapSettings;
 
@@ -12,6 +12,27 @@ pub enum LeaderAction {
     Command(String),
     /// Execute a key sequence (for motions, etc.)
     Keys(Vec<KeyEvent>),
+}
+
+/// Metadata for one visible leader-key continuation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeaderHint {
+    /// Next key to press from the current prefix.
+    pub key: String,
+    /// Full sequence after the leader key.
+    pub sequence: String,
+    /// Description shown in leader popup UIs.
+    pub description: String,
+    /// Whether this sequence executes a mapping directly.
+    pub is_exact: bool,
+    /// Whether this sequence has longer continuations.
+    pub has_children: bool,
+}
+
+#[derive(Debug, Clone)]
+struct LeaderMetadata {
+    action: String,
+    desc: Option<String>,
 }
 
 /// Action for command mode (`:` prompt) keybindings.
@@ -44,6 +65,8 @@ pub struct KeymapLookup {
     leader_key: Option<KeyEvent>,
     /// Leader mappings: key sequence -> action
     leader_mappings: HashMap<String, LeaderAction>,
+    /// Leader mapping metadata used for discoverability UI.
+    leader_metadata: HashMap<String, LeaderMetadata>,
 }
 
 impl Default for KeymapLookup {
@@ -55,6 +78,7 @@ impl Default for KeymapLookup {
             command: HashMap::new(),
             leader_key: None,
             leader_mappings: HashMap::new(),
+            leader_metadata: HashMap::new(),
         }
     }
 }
@@ -154,9 +178,17 @@ impl KeymapLookup {
 
         // Parse leader mappings
         let mut leader_mappings = HashMap::new();
+        let mut leader_metadata = HashMap::new();
         for mapping in &settings.leader_mappings {
             let action = parse_action(&mapping.action);
             leader_mappings.insert(mapping.key.clone(), action);
+            leader_metadata.insert(
+                mapping.key.clone(),
+                LeaderMetadata {
+                    action: mapping.action.clone(),
+                    desc: mapping.desc.clone(),
+                },
+            );
         }
 
         (
@@ -167,6 +199,7 @@ impl KeymapLookup {
                 command,
                 leader_key,
                 leader_mappings,
+                leader_metadata,
             },
             errors,
         )
@@ -231,6 +264,61 @@ impl KeymapLookup {
         self.leader_mappings
             .keys()
             .any(|k| k.starts_with(sequence) && k != sequence)
+    }
+
+    /// Return available leader continuations for the current prefix.
+    pub fn leader_hints(&self, prefix: &str) -> Vec<LeaderHint> {
+        let mut hints = BTreeMap::new();
+
+        for sequence in self.leader_mappings.keys() {
+            let Some(remainder) = sequence.strip_prefix(prefix) else {
+                continue;
+            };
+            if remainder.is_empty() {
+                continue;
+            }
+
+            let Some(next_key) = remainder.chars().next() else {
+                continue;
+            };
+            let key = next_key.to_string();
+            let candidate = format!("{}{}", prefix, key);
+            let is_exact = self.leader_mappings.contains_key(&candidate);
+            let has_children = self.is_leader_prefix(&candidate);
+            let description = self.leader_hint_description(&candidate, is_exact, has_children);
+
+            hints.entry(key.clone()).or_insert(LeaderHint {
+                key,
+                sequence: candidate,
+                description,
+                is_exact,
+                has_children,
+            });
+        }
+
+        hints.into_values().collect()
+    }
+
+    fn leader_hint_description(
+        &self,
+        sequence: &str,
+        is_exact: bool,
+        has_children: bool,
+    ) -> String {
+        if is_exact {
+            if let Some(metadata) = self.leader_metadata.get(sequence) {
+                if let Some(desc) = metadata.desc.as_ref().filter(|desc| !desc.is_empty()) {
+                    return desc.clone();
+                }
+                return metadata.action.clone();
+            }
+        }
+
+        if has_children {
+            "prefix".to_string()
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -455,6 +543,7 @@ mod tests {
         let settings = KeymapSettings {
             leader: " ".to_string(), // Literal space, as used in default config
             timeoutlen: 1000,
+            show_leader_popup: true,
             normal: vec![],
             visual: vec![],
             insert: vec![],
@@ -488,6 +577,7 @@ mod tests {
         let settings = KeymapSettings {
             leader: "<Space>".to_string(),
             timeoutlen: 1000,
+            show_leader_popup: true,
             normal: vec![],
             visual: vec![],
             insert: vec![],
@@ -560,6 +650,43 @@ mod tests {
         assert!(lookup.is_leader_prefix("f"));
         assert!(lookup.is_leader_prefix("t"));
         assert!(lookup.is_leader_prefix("g"));
+    }
+
+    #[test]
+    fn leader_hints_show_available_continuations_for_prefix() {
+        use super::super::KeymapSettings;
+
+        let (lookup, errors) = KeymapLookup::from_settings(&KeymapSettings::default());
+        assert!(errors.is_empty(), "Should have no errors");
+
+        let root_hints = lookup.leader_hints("");
+        let files_group = root_hints
+            .iter()
+            .find(|hint| hint.key == "f")
+            .expect("expected <leader>f group");
+        assert_eq!(files_group.sequence, "f");
+        assert!(files_group.has_children);
+        assert!(!files_group.is_exact);
+
+        let save = root_hints
+            .iter()
+            .find(|hint| hint.key == "w")
+            .expect("expected <leader>w");
+        assert_eq!(save.sequence, "w");
+        assert_eq!(save.description, "Save file");
+        assert!(save.is_exact);
+        assert!(!save.has_children);
+
+        let file_hints = lookup.leader_hints("f");
+        assert!(file_hints.iter().any(|hint| {
+            hint.key == "f" && hint.sequence == "ff" && hint.description == "Find files"
+        }));
+        assert!(file_hints.iter().any(|hint| {
+            hint.key == "g" && hint.sequence == "fg" && hint.description == "Live grep"
+        }));
+        assert!(file_hints.iter().any(|hint| {
+            hint.key == "k" && hint.sequence == "fk" && hint.description == "Search keymaps"
+        }));
     }
 
     #[test]

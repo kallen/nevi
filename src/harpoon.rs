@@ -46,7 +46,9 @@ impl Harpoon {
 
     /// Get the harpoon data file path
     fn data_file_path(&self) -> Option<PathBuf> {
-        self.project_root.as_ref().map(|root| root.join(".nevi").join("harpoon.json"))
+        self.project_root
+            .as_ref()
+            .map(|root| root.join(".nevi").join("harpoon.json"))
     }
 
     /// Load harpoon data from disk
@@ -62,9 +64,7 @@ impl Harpoon {
         match std::fs::read_to_string(&path) {
             Ok(content) => {
                 if let Ok(data) = serde_json::from_str::<HarpoonData>(&content) {
-                    self.files = data.files.into_iter()
-                        .map(PathBuf::from)
-                        .collect();
+                    self.files = data.files.into_iter().map(PathBuf::from).collect();
                 }
             }
             Err(_) => {}
@@ -83,7 +83,9 @@ impl Harpoon {
         }
 
         let data = HarpoonData {
-            files: self.files.iter()
+            files: self
+                .files
+                .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect(),
         };

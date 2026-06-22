@@ -313,14 +313,20 @@ vim_default = true
             .iter()
             .filter(|item| item.display.contains(":GitChanges"))
             .count();
-        assert_eq!(gitchanges, 1, "exactly one :GitChanges row, from the registry");
+        assert_eq!(
+            gitchanges, 1,
+            "exactly one :GitChanges row, from the registry"
+        );
         // FindFiles is in both the registry and the (now-excluded) TOML commands
         // section — it must appear exactly once, proving no duplication.
         let findfiles = items
             .iter()
             .filter(|item| item.display.contains(":FindFiles"))
             .count();
-        assert_eq!(findfiles, 1, ":FindFiles should appear once (registry only)");
+        assert_eq!(
+            findfiles, 1,
+            ":FindFiles should appear once (registry only)"
+        );
     }
 
     #[test]
@@ -347,7 +353,9 @@ vim_default = true
         }];
         let items = keymap_finder_items(&keymap);
         assert!(
-            items.iter().any(|item| item.display.contains("remapped to ^")),
+            items
+                .iter()
+                .any(|item| item.display.contains("remapped to ^")),
             "the user's H -> ^ remap should appear in the cheatsheet"
         );
     }
@@ -364,6 +372,17 @@ vim_default = true
     }
 
     #[test]
+    fn picker_includes_leader_popup_trigger() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("<leader>") && item.display.contains("Show leader key popup")
+            }),
+            "leader popup trigger should appear in :Keymaps"
+        );
+    }
+
+    #[test]
     fn leader_rows_get_leader_prefix() {
         let entries = parse_keybinds(SAMPLE);
         let ff = entries.iter().find(|e| e.key == "ff").unwrap();
@@ -374,8 +393,15 @@ vim_default = true
     #[test]
     fn embedded_file_parses_and_is_fully_described() {
         let entries = load_keybinds();
-        assert!(entries.len() > 250, "expected a substantial keymap, got {}", entries.len());
-        assert!(entries.iter().all(|e| !e.desc.is_empty()), "every entry needs a description");
+        assert!(
+            entries.len() > 250,
+            "expected a substantial keymap, got {}",
+            entries.len()
+        );
+        assert!(
+            entries.iter().all(|e| !e.desc.is_empty()),
+            "every entry needs a description"
+        );
         assert!(entries.iter().any(|e| e.status == "implemented"));
     }
 }

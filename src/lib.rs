@@ -17,17 +17,21 @@ pub mod syntax;
 pub mod terminal;
 pub mod theme;
 
-pub use config::{load_config, Settings, KeymapLookup, LeaderAction, AutosaveMode, CopilotSettings};
-pub use config::{load_languages_config, LanguagesConfig, FormatterConfig};
-pub use copilot::{CopilotManager, CopilotStatus, GhostTextState};
+pub use config::{
+    load_config, AutosaveMode, CopilotSettings, KeymapLookup, LeaderAction, Settings,
+};
+pub use config::{load_languages_config, FormatterConfig, LanguagesConfig};
 pub use copilot::types::CopilotNotification;
-pub use editor::{Editor, Mode, Buffer, Cursor, LspAction, CopilotAction, CopilotGhostText, ThemePicker};
-pub use floating_terminal::FloatingTerminal;
-pub use harpoon::Harpoon;
+pub use copilot::{CopilotManager, CopilotStatus, GhostTextState};
+pub use editor::{
+    Buffer, CopilotAction, CopilotGhostText, Cursor, Editor, LspAction, Mode, ThemePicker,
+};
 pub use explorer::FileExplorer;
-pub use finder::{FuzzyFinder, FinderMode, FloatingWindow};
+pub use finder::{FinderMode, FloatingWindow, FuzzyFinder};
+pub use floating_terminal::FloatingTerminal;
 pub use frecency::FrecencyDb;
-pub use lsp::{LspManager, LspNotification, LspStatus, MultiLspManager, LanguageId};
+pub use harpoon::Harpoon;
+pub use lsp::{LanguageId, LspManager, LspNotification, LspStatus, MultiLspManager};
 pub use markdown_preview::{
     render_markdown, MarkdownPreview, MarkdownPreviewState, PreviewLine, PreviewLineKind,
     PreviewSpan, PreviewSpanStyle,

@@ -8,48 +8,59 @@ pub enum Motion {
     Right,
     Up,
     Down,
+    DisplayLineUp,            // gk - up one display line when wrap is enabled
+    DisplayLineDown,          // gj - down one display line when wrap is enabled
+    DisplayLineStart,         // g0 - start of current display line
+    DisplayLineEnd,           // g$ - end of current display line
+    DisplayLineFirstNonBlank, // g^ - first non-blank of current display line
 
     // Word motions
-    WordForward,       // w
-    WordBackward,      // b
-    WordEnd,           // e
-    WordEndBackward,   // ge
-    BigWordForward,    // W
-    BigWordBackward,   // B
-    BigWordEnd,        // E
-    BigWordEndBackward,// gE
+    WordForward,        // w
+    WordBackward,       // b
+    WordEnd,            // e
+    WordEndBackward,    // ge
+    BigWordForward,     // W
+    BigWordBackward,    // B
+    BigWordEnd,         // E
+    BigWordEndBackward, // gE
 
     // Line motions
-    LineStart,        // 0
-    FirstNonBlank,    // ^
-    LineEnd,          // $
+    LineStart,             // 0
+    FirstNonBlank,         // ^
+    LineEnd,               // $
+    NextLineFirstNonBlank, // +
+    PrevLineFirstNonBlank, // -
 
     // File motions
-    FileStart,        // gg
-    FileEnd,          // G
-    GotoLine(usize),  // {count}G
+    FileStart,       // gg
+    FileEnd,         // G
+    GotoLine(usize), // {count}G
 
     // Screen motions
-    HalfPageDown,     // Ctrl-d
-    HalfPageUp,       // Ctrl-u
-    PageDown,         // Ctrl-f
-    PageUp,           // Ctrl-b
-    ScreenTop,        // H - top of screen
-    ScreenMiddle,     // M - middle of screen
-    ScreenBottom,     // L - bottom of screen
+    HalfPageDown, // Ctrl-d
+    HalfPageUp,   // Ctrl-u
+    PageDown,     // Ctrl-f
+    PageUp,       // Ctrl-b
+    ScreenTop,    // H - top of screen
+    ScreenMiddle, // M - middle of screen
+    ScreenBottom, // L - bottom of screen
 
     // Find char motions
-    FindChar(char),       // f{char}
-    FindCharBack(char),   // F{char}
-    TillChar(char),       // t{char}
-    TillCharBack(char),   // T{char}
+    FindChar(char),     // f{char}
+    FindCharBack(char), // F{char}
+    TillChar(char),     // t{char}
+    TillCharBack(char), // T{char}
 
     // Paragraph motions
-    ParagraphForward,     // }
-    ParagraphBackward,    // {
+    ParagraphForward,  // }
+    ParagraphBackward, // {
+
+    // Sentence motions
+    SentenceForward,  // )
+    SentenceBackward, // (
 
     // Bracket matching
-    MatchingBracket,      // %
+    MatchingBracket, // %
 }
 
 /// Check if a character is a "word" character (alphanumeric or underscore)
@@ -67,8 +78,8 @@ fn is_keyword_char(ch: char) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CharClass {
     Whitespace,
-    Word,      // alphanumeric + underscore
-    Keyword,   // punctuation, symbols
+    Word,    // alphanumeric + underscore
+    Keyword, // punctuation, symbols
 }
 
 fn classify_char(ch: char) -> CharClass {
@@ -94,9 +105,7 @@ pub fn apply_motion(
     let count = count.max(1);
 
     match motion {
-        Motion::Left => {
-            Some((line, col.saturating_sub(count)))
-        }
+        Motion::Left => Some((line, col.saturating_sub(count))),
 
         Motion::Right => {
             let line_len = buffer.line_len(line);
@@ -104,14 +113,32 @@ pub fn apply_motion(
             Some((line, new_col))
         }
 
-        Motion::Up => {
-            Some((line.saturating_sub(count), col))
-        }
+        Motion::Up => Some((line.saturating_sub(count), col)),
 
         Motion::Down => {
             let max_line = buffer.len_lines().saturating_sub(1);
             let new_line = (line + count).min(max_line);
             Some((new_line, col))
+        }
+
+        Motion::DisplayLineUp => Some((line.saturating_sub(count), col)),
+
+        Motion::DisplayLineDown => {
+            let max_line = buffer.len_lines().saturating_sub(1);
+            let new_line = (line + count).min(max_line);
+            Some((new_line, col))
+        }
+
+        Motion::DisplayLineStart => Some((line, 0)),
+
+        Motion::DisplayLineEnd => {
+            let line_len = buffer.line_len(line);
+            Some((line, line_len.saturating_sub(1)))
+        }
+
+        Motion::DisplayLineFirstNonBlank => {
+            let first_non_blank = find_first_non_blank(buffer, line);
+            Some((line, first_non_blank))
         }
 
         Motion::WordForward => {
@@ -226,9 +253,7 @@ pub fn apply_motion(
             Some((l, c))
         }
 
-        Motion::LineStart => {
-            Some((line, 0))
-        }
+        Motion::LineStart => Some((line, 0)),
 
         Motion::FirstNonBlank => {
             let first_non_blank = find_first_non_blank(buffer, line);
@@ -240,9 +265,20 @@ pub fn apply_motion(
             Some((line, line_len.saturating_sub(1)))
         }
 
-        Motion::FileStart => {
-            Some((0, 0))
+        Motion::NextLineFirstNonBlank => {
+            let max_line = buffer.len_lines().saturating_sub(1);
+            let target_line = (line + count).min(max_line);
+            let first_non_blank = find_first_non_blank(buffer, target_line);
+            Some((target_line, first_non_blank))
         }
+
+        Motion::PrevLineFirstNonBlank => {
+            let target_line = line.saturating_sub(count);
+            let first_non_blank = find_first_non_blank(buffer, target_line);
+            Some((target_line, first_non_blank))
+        }
+
+        Motion::FileStart => Some((0, 0)),
 
         Motion::FileEnd => {
             let last_line = buffer.len_lines().saturating_sub(1);
@@ -250,7 +286,9 @@ pub fn apply_motion(
         }
 
         Motion::GotoLine(target) => {
-            let target_line = target.saturating_sub(1).min(buffer.len_lines().saturating_sub(1));
+            let target_line = target
+                .saturating_sub(1)
+                .min(buffer.len_lines().saturating_sub(1));
             Some((target_line, 0))
         }
 
@@ -278,21 +316,13 @@ pub fn apply_motion(
             Some((new_line, col))
         }
 
-        Motion::FindChar(target) => {
-            find_char_forward(buffer, line, col, target, count, false)
-        }
+        Motion::FindChar(target) => find_char_forward(buffer, line, col, target, count, false),
 
-        Motion::FindCharBack(target) => {
-            find_char_backward(buffer, line, col, target, count, false)
-        }
+        Motion::FindCharBack(target) => find_char_backward(buffer, line, col, target, count, false),
 
-        Motion::TillChar(target) => {
-            find_char_forward(buffer, line, col, target, count, true)
-        }
+        Motion::TillChar(target) => find_char_forward(buffer, line, col, target, count, true),
 
-        Motion::TillCharBack(target) => {
-            find_char_backward(buffer, line, col, target, count, true)
-        }
+        Motion::TillCharBack(target) => find_char_backward(buffer, line, col, target, count, true),
 
         Motion::ScreenTop => {
             // H - move to top of screen
@@ -364,6 +394,14 @@ pub fn apply_motion(
             Some((l, 0))
         }
 
+        Motion::SentenceForward => {
+            find_sentence_start(buffer, line, col, count, SentenceDirection::Forward)
+        }
+
+        Motion::SentenceBackward => {
+            find_sentence_start(buffer, line, col, count, SentenceDirection::Backward)
+        }
+
         Motion::MatchingBracket => {
             // % - jump to matching bracket
             find_matching_bracket(buffer, line, col)
@@ -385,6 +423,111 @@ fn is_blank_line(buffer: &Buffer, line: usize) -> bool {
         }
     }
     true
+}
+
+enum SentenceDirection {
+    Forward,
+    Backward,
+}
+
+fn find_sentence_start(
+    buffer: &Buffer,
+    line: usize,
+    col: usize,
+    count: usize,
+    direction: SentenceDirection,
+) -> Option<(usize, usize)> {
+    let content = buffer.content();
+    let chars: Vec<char> = content.chars().collect();
+    if chars.is_empty() {
+        return Some((0, 0));
+    }
+
+    let current_idx = buffer
+        .line_col_to_char(line, col)
+        .min(chars.len().saturating_sub(1));
+    let starts = sentence_starts(&chars);
+    if starts.is_empty() {
+        return Some(char_index_to_line_col(buffer, current_idx));
+    }
+
+    let mut idx = current_idx;
+    for _ in 0..count {
+        match direction {
+            SentenceDirection::Forward => {
+                if let Some(next) = starts.iter().copied().find(|start| *start > idx) {
+                    idx = next;
+                }
+            }
+            SentenceDirection::Backward => {
+                if let Some(prev) = starts.iter().rev().copied().find(|start| *start < idx) {
+                    idx = prev;
+                } else {
+                    idx = starts[0];
+                }
+            }
+        }
+    }
+
+    Some(char_index_to_line_col(buffer, idx))
+}
+
+fn sentence_starts(chars: &[char]) -> Vec<usize> {
+    let mut starts = Vec::new();
+    if let Some(first) = skip_sentence_space(chars, 0) {
+        starts.push(first);
+    }
+
+    for idx in 0..chars.len() {
+        if !is_sentence_end(chars[idx]) {
+            continue;
+        }
+
+        let after_closers = skip_sentence_closers(chars, idx + 1);
+        if after_closers < chars.len() && !chars[after_closers].is_whitespace() {
+            continue;
+        }
+
+        if let Some(start) = skip_sentence_space(chars, after_closers) {
+            if starts.last().copied() != Some(start) {
+                starts.push(start);
+            }
+        }
+    }
+
+    starts
+}
+
+fn is_sentence_end(ch: char) -> bool {
+    matches!(ch, '.' | '!' | '?')
+}
+
+fn skip_sentence_closers(chars: &[char], mut idx: usize) -> usize {
+    while idx < chars.len() && matches!(chars[idx], '"' | '\'' | ')' | ']' | '}') {
+        idx += 1;
+    }
+    idx
+}
+
+fn skip_sentence_space(chars: &[char], mut idx: usize) -> Option<usize> {
+    while idx < chars.len() && chars[idx].is_whitespace() {
+        idx += 1;
+    }
+    (idx < chars.len()).then_some(idx)
+}
+
+fn char_index_to_line_col(buffer: &Buffer, char_idx: usize) -> (usize, usize) {
+    let mut remaining = char_idx;
+    for line in 0..buffer.len_lines() {
+        let len = buffer.line_len_including_newline(line);
+        if remaining < len {
+            return (line, remaining.min(buffer.line_len(line)));
+        }
+        remaining = remaining.saturating_sub(len);
+    }
+
+    let last_line = buffer.len_lines().saturating_sub(1);
+    (last_line, buffer.line_len(last_line).saturating_sub(1))
 }
 
 /// Find the matching bracket for the character at (line, col)
@@ -436,7 +579,13 @@ fn is_bracket(ch: char) -> bool {
 }
 
 /// Search forward for matching bracket
-fn find_matching_forward(buffer: &Buffer, start_line: usize, start_col: usize, open: char, close: char) -> Option<(usize, usize)> {
+fn find_matching_forward(
+    buffer: &Buffer,
+    start_line: usize,
+    start_col: usize,
+    open: char,
+    close: char,
+) -> Option<(usize, usize)> {
     let total_lines = buffer.len_lines();
     let mut depth = 0;
 
@@ -461,12 +610,22 @@ fn find_matching_forward(buffer: &Buffer, start_line: usize, start_col: usize, o
 }
 
 /// Search backward for matching bracket
-fn find_matching_backward(buffer: &Buffer, start_line: usize, start_col: usize, close: char, open: char) -> Option<(usize, usize)> {
+fn find_matching_backward(
+    buffer: &Buffer,
+    start_line: usize,
+    start_col: usize,
+    close: char,
+    open: char,
+) -> Option<(usize, usize)> {
     let mut depth = 0;
 
     for l in (0..=start_line).rev() {
         let line_len = buffer.line_len(l);
-        let end_c = if l == start_line { start_col } else { line_len.saturating_sub(1) };
+        let end_c = if l == start_line {
+            start_col
+        } else {
+            line_len.saturating_sub(1)
+        };
 
         if line_len == 0 {
             continue;
@@ -489,7 +648,12 @@ fn find_matching_backward(buffer: &Buffer, start_line: usize, start_col: usize, 
 }
 
 /// Find the start of the next word (w motion)
-fn find_word_forward(buffer: &Buffer, line: usize, col: usize, big_word: bool) -> Option<(usize, usize)> {
+fn find_word_forward(
+    buffer: &Buffer,
+    line: usize,
+    col: usize,
+    big_word: bool,
+) -> Option<(usize, usize)> {
     let mut l = line;
     let mut c = col;
     let total_lines = buffer.len_lines();
@@ -516,7 +680,8 @@ fn find_word_forward(buffer: &Buffer, line: usize, col: usize, big_word: bool) -
             let class = classify_char(ch);
             let same_class = if big_word {
                 // For WORD, only whitespace breaks
-                class != CharClass::Whitespace && start_class.map_or(false, |sc| sc != CharClass::Whitespace)
+                class != CharClass::Whitespace
+                    && start_class.map_or(false, |sc| sc != CharClass::Whitespace)
             } else {
                 // For word, same class continues
                 Some(class) == start_class && class != CharClass::Whitespace
@@ -570,7 +735,12 @@ fn find_word_forward(buffer: &Buffer, line: usize, col: usize, big_word: bool) -
 }
 
 /// Find the start of the previous word (b motion)
-fn find_word_backward(buffer: &Buffer, line: usize, col: usize, big_word: bool) -> Option<(usize, usize)> {
+fn find_word_backward(
+    buffer: &Buffer,
+    line: usize,
+    col: usize,
+    big_word: bool,
+) -> Option<(usize, usize)> {
     let mut l = line;
     let mut c = col;
 
@@ -648,7 +818,12 @@ fn find_word_backward(buffer: &Buffer, line: usize, col: usize, big_word: bool) 
 }
 
 /// Find the end of the current/next word (e motion)
-fn find_word_end(buffer: &Buffer, line: usize, col: usize, big_word: bool) -> Option<(usize, usize)> {
+fn find_word_end(
+    buffer: &Buffer,
+    line: usize,
+    col: usize,
+    big_word: bool,
+) -> Option<(usize, usize)> {
     let mut l = line;
     let mut c = col;
     let total_lines = buffer.len_lines();
@@ -662,7 +837,12 @@ fn find_word_end(buffer: &Buffer, line: usize, col: usize, big_word: bool) -> Op
     }
 
     if l >= total_lines {
-        return Some((total_lines.saturating_sub(1), buffer.line_len(total_lines.saturating_sub(1)).saturating_sub(1)));
+        return Some((
+            total_lines.saturating_sub(1),
+            buffer
+                .line_len(total_lines.saturating_sub(1))
+                .saturating_sub(1),
+        ));
     }
 
     // Phase 1: Skip whitespace
@@ -814,7 +994,12 @@ fn find_char_backward(
 }
 
 /// Find the end of the previous word (ge/gE motion)
-fn find_word_end_backward(buffer: &Buffer, line: usize, col: usize, big_word: bool) -> Option<(usize, usize)> {
+fn find_word_end_backward(
+    buffer: &Buffer,
+    line: usize,
+    col: usize,
+    big_word: bool,
+) -> Option<(usize, usize)> {
     let mut l = line;
     let mut c = col;
 

@@ -196,7 +196,13 @@ impl Buffer {
     }
 
     /// Delete a range of characters
-    pub fn delete_range(&mut self, start_line: usize, start_col: usize, end_line: usize, end_col: usize) {
+    pub fn delete_range(
+        &mut self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) {
         let start = self.line_col_to_char(start_line, start_col);
         let end = self.line_col_to_char(end_line, end_col);
         if start < end && end <= self.text.len_chars() {
@@ -277,7 +283,13 @@ impl Buffer {
     }
 
     /// Get text in a range as a string
-    pub fn get_text_range(&self, start_line: usize, start_col: usize, end_line: usize, end_col: usize) -> String {
+    pub fn get_text_range(
+        &self,
+        start_line: usize,
+        start_col: usize,
+        end_line: usize,
+        end_col: usize,
+    ) -> String {
         let start = self.line_col_to_char(start_line, start_col);
         let end = self.line_col_to_char(end_line, end_col);
         if start < end && end <= self.text.len_chars() {
@@ -289,7 +301,9 @@ impl Buffer {
 
     /// Get a single character as a string
     pub fn get_char_str(&self, line: usize, col: usize) -> String {
-        self.char_at(line, col).map(|c| c.to_string()).unwrap_or_default()
+        self.char_at(line, col)
+            .map(|c| c.to_string())
+            .unwrap_or_default()
     }
 
     /// Get leading whitespace from a line
@@ -358,7 +372,9 @@ fn write_file_atomically(
     let file_name = path
         .file_name()
         .ok_or_else(|| anyhow::anyhow!("Invalid file path: {}", path.display()))?;
-    let target_permissions = fs::metadata(path).ok().map(|metadata| metadata.permissions());
+    let target_permissions = fs::metadata(path)
+        .ok()
+        .map(|metadata| metadata.permissions());
     let (temp_path, temp_file) = create_save_temp_file(parent, file_name)?;
     let mut writer = io::BufWriter::new(temp_file);
 

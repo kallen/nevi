@@ -1,5 +1,5 @@
-use nucleo::Matcher;
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo::Matcher;
 use nucleo::Utf32Str;
 
 /// Fuzzy matcher wrapper using nucleo

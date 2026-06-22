@@ -34,6 +34,16 @@ pub enum RequestKind {
         line: u32,
         character: u32,
     },
+    Declaration {
+        uri: String,
+        line: u32,
+        character: u32,
+    },
+    Implementation {
+        uri: String,
+        line: u32,
+        character: u32,
+    },
     Hover {
         uri: String,
         line: u32,
@@ -127,6 +137,18 @@ pub enum LspRequest {
         line: u32,
         character: u32,
     },
+    /// Request go-to-declaration
+    GotoDeclaration {
+        uri: String,
+        line: u32,
+        character: u32,
+    },
+    /// Request go-to-implementation
+    GotoImplementation {
+        uri: String,
+        line: u32,
+        character: u32,
+    },
 
     /// Request hover information
     Hover {
@@ -207,6 +229,7 @@ pub enum LspNotification {
     /// Definition location result (may have multiple locations for traits, etc.)
     Definition {
         locations: Vec<Location>,
+        target_kind: LspNavigationTargetKind,
         /// Request context for validation
         request_uri: String,
     },
@@ -295,6 +318,23 @@ pub enum LspNotification {
         percentage: Option<u64>,
         done: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LspNavigationTargetKind {
+    Definition,
+    Declaration,
+    Implementation,
+}
+
+impl LspNavigationTargetKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Definition => "definition",
+            Self::Declaration => "declaration",
+            Self::Implementation => "implementation",
+        }
+    }
 }
 
 /// A code action item from LSP

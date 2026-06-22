@@ -107,7 +107,10 @@ pub struct CopilotClient {
 
 impl CopilotClient {
     /// Spawn a new Copilot server process
-    pub fn spawn(node_path: &str, server_path: &str) -> Result<(Self, PendingRequests, SharedStdin)> {
+    pub fn spawn(
+        node_path: &str,
+        server_path: &str,
+    ) -> Result<(Self, PendingRequests, SharedStdin)> {
         let mut process = Command::new(node_path)
             .arg(server_path)
             .arg("--stdio")
@@ -192,7 +195,11 @@ impl CopilotClient {
 
     /// Initiate device flow sign-in
     pub fn sign_in_initiate(&mut self) -> Result<u64> {
-        self.send_request("signInInitiate", json!({}), CopilotRequestKind::SignInInitiate)
+        self.send_request(
+            "signInInitiate",
+            json!({}),
+            CopilotRequestKind::SignInInitiate,
+        )
     }
 
     /// Confirm sign-in with user code
@@ -274,7 +281,13 @@ impl CopilotClient {
     }
 
     /// Notify server that a document was opened
-    pub fn did_open(&mut self, uri: &str, language_id: &str, version: i32, text: &str) -> Result<()> {
+    pub fn did_open(
+        &mut self,
+        uri: &str,
+        language_id: &str,
+        version: i32,
+        text: &str,
+    ) -> Result<()> {
         let params = json!({
             "textDocument": {
                 "uri": uri,
@@ -319,7 +332,12 @@ impl CopilotClient {
     }
 
     /// Send a JSON-RPC request and track it
-    fn send_request(&mut self, method: &str, params: Value, kind: CopilotRequestKind) -> Result<u64> {
+    fn send_request(
+        &mut self,
+        method: &str,
+        params: Value,
+        kind: CopilotRequestKind,
+    ) -> Result<u64> {
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         // Track request before sending
@@ -331,12 +349,19 @@ impl CopilotClient {
             jsonrpc: "2.0",
             id,
             method: method.to_string(),
-            params: if params.is_null() { None } else { Some(params.clone()) },
+            params: if params.is_null() {
+                None
+            } else {
+                Some(params.clone())
+            },
         };
 
         debug_log(&format!("SEND REQUEST id={} method={}", id, method));
         if method == "getCompletions" {
-            debug_log(&format!("  params={}", serde_json::to_string_pretty(&params).unwrap_or_default()));
+            debug_log(&format!(
+                "  params={}",
+                serde_json::to_string_pretty(&params).unwrap_or_default()
+            ));
         }
 
         if let Err(err) = self.send_message(&serde_json::to_string(&request)?) {
@@ -363,7 +388,10 @@ impl CopilotClient {
     /// Send a raw message with Content-Length header
     fn send_message(&mut self, content: &str) -> Result<()> {
         let message = format!("Content-Length: {}\r\n\r\n{}", content.len(), content);
-        let mut stdin = self.stdin.lock().map_err(|_| anyhow!("Failed to lock stdin"))?;
+        let mut stdin = self
+            .stdin
+            .lock()
+            .map_err(|_| anyhow!("Failed to lock stdin"))?;
         stdin.write_all(message.as_bytes())?;
         stdin.flush()?;
         Ok(())
@@ -478,7 +506,10 @@ fn handle_message(
 
     // Handle errors
     if let Some(error) = msg.error {
-        debug_log(&format!("  ERROR code={} message={}", error.code, error.message));
+        debug_log(&format!(
+            "  ERROR code={} message={}",
+            error.code, error.message
+        ));
         if let Ok(mut pending_map) = pending.lock() {
             pending_map.remove(&id_num);
         }
@@ -564,7 +595,9 @@ fn handle_notification(method: &str, params: Option<Value>) -> Option<CopilotNot
 /// Handle a server-initiated request
 fn handle_server_request(id: JsonRpcId, method: &str, _params: Option<Value>) -> Option<String> {
     match method {
-        "workspace/configuration" | "client/registerCapability" | "window/workDoneProgress/create" => {
+        "workspace/configuration"
+        | "client/registerCapability"
+        | "window/workDoneProgress/create" => {
             // Return empty/null result
             build_response(JsonRpcResponseOut {
                 jsonrpc: "2.0",
@@ -596,7 +629,10 @@ fn build_response(response: JsonRpcResponseOut) -> Option<String> {
 /// Handle checkStatus response
 fn handle_check_status_response(result: Value) -> Option<CopilotNotification> {
     let status = result.get("status")?.as_str()?;
-    let user = result.get("user").and_then(|u| u.as_str()).map(|s| s.to_string());
+    let user = result
+        .get("user")
+        .and_then(|u| u.as_str())
+        .map(|s| s.to_string());
 
     let auth_status = match status {
         "OK" | "Normal" => {
@@ -617,7 +653,10 @@ fn handle_check_status_response(result: Value) -> Option<CopilotNotification> {
 fn handle_sign_in_initiate_response(result: Value) -> Option<CopilotNotification> {
     let verification_uri = result.get("verificationUri")?.as_str()?.to_string();
     let user_code = result.get("userCode")?.as_str()?.to_string();
-    let expires_in = result.get("expiresIn").and_then(|e| e.as_u64()).unwrap_or(900) as u32;
+    let expires_in = result
+        .get("expiresIn")
+        .and_then(|e| e.as_u64())
+        .unwrap_or(900) as u32;
     let interval = result.get("interval").and_then(|i| i.as_u64()).unwrap_or(5) as u32;
 
     Some(CopilotNotification::SignInRequired(SignInInfo {
@@ -631,7 +670,10 @@ fn handle_sign_in_initiate_response(result: Value) -> Option<CopilotNotification
 /// Handle signInConfirm response
 fn handle_sign_in_confirm_response(result: Value) -> Option<CopilotNotification> {
     let status = result.get("status")?.as_str()?;
-    let user = result.get("user").and_then(|u| u.as_str()).map(|s| s.to_string());
+    let user = result
+        .get("user")
+        .and_then(|u| u.as_str())
+        .map(|s| s.to_string());
 
     let auth_status = match status {
         "OK" | "Normal" => {
@@ -655,13 +697,16 @@ fn handle_sign_in_confirm_response(result: Value) -> Option<CopilotNotification>
 }
 
 /// Handle completions response
-fn handle_completions_response(
-    result: Value,
-    request_id: u64,
-) -> Option<CopilotNotification> {
-    debug_log(&format!("  Parsing completions response: {}", serde_json::to_string(&result).unwrap_or_default()));
+fn handle_completions_response(result: Value, request_id: u64) -> Option<CopilotNotification> {
+    debug_log(&format!(
+        "  Parsing completions response: {}",
+        serde_json::to_string(&result).unwrap_or_default()
+    ));
     let completions_json = result.get("completions")?.as_array()?;
-    debug_log(&format!("  Found {} completions in response", completions_json.len()));
+    debug_log(&format!(
+        "  Found {} completions in response",
+        completions_json.len()
+    ));
 
     let completions: Vec<CopilotCompletion> = completions_json
         .iter()

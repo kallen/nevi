@@ -6,9 +6,7 @@ use crossterm::{
         PushKeyboardEnhancementFlags,
     },
     execute, queue,
-    style::{
-        Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
-    },
+    style::{Attribute, Color, ResetColor, SetAttribute, SetBackgroundColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
 use std::io::{self, Stdout, Write};
@@ -477,7 +475,9 @@ fn calculate_wrap_segments(
                 take_count += 1;
             }
 
-            let text: String = chars[current_col..current_col + take_count].iter().collect();
+            let text: String = chars[current_col..current_col + take_count]
+                .iter()
+                .collect();
 
             segments.push(WrapSegment {
                 start_col: current_col,
@@ -504,6 +504,7 @@ fn calculate_wrap_segments(
 pub struct Terminal {
     stdout: Stdout,
     mouse_capture_enabled: bool,
+    leader_popup_rect: Option<(u16, u16)>,
 }
 
 impl Terminal {
@@ -523,6 +524,7 @@ impl Terminal {
         Ok(Self {
             stdout,
             mouse_capture_enabled: false,
+            leader_popup_rect: None,
         })
     }
 
@@ -650,6 +652,14 @@ impl Terminal {
             self.render_command_line(editor)?;
         }
 
+        if self.leader_popup_rect.is_some() && editor.leader_popup_items().is_empty() {
+            if skip_background {
+                self.clear_leader_popup_area(editor)?;
+            } else {
+                self.leader_popup_rect = None;
+            }
+        }
+
         // Render finder if in finder mode
         if editor.mode == Mode::Finder {
             self.render_finder(editor)?;
@@ -697,6 +707,10 @@ impl Terminal {
             self.render_theme_picker(editor)?;
         }
 
+        if !editor.leader_popup_items().is_empty() {
+            self.render_leader_popup(editor)?;
+        }
+
         // Position cursor
         if editor.floating_terminal.is_visible() {
             self.render_floating_terminal(editor)?;
@@ -707,6 +721,138 @@ impl Terminal {
         }
 
         self.stdout.flush()?;
+        Ok(())
+    }
+
+    /// Render available leader-key continuations above the status line.
+    fn render_leader_popup(&mut self, editor: &Editor) -> anyhow::Result<()> {
+        let Some(prefix) = editor.leader_sequence.as_deref() else {
+            self.clear_leader_popup_area(editor)?;
+            return Ok(());
+        };
+
+        let items = editor.leader_popup_items();
+        if items.is_empty() {
+            self.clear_leader_popup_area(editor)?;
+            return Ok(());
+        }
+
+        let status_row = editor.term_height.saturating_sub(2);
+        if status_row == 0 {
+            return Ok(());
+        }
+
+        let term_width = editor.term_width as usize;
+        if term_width < 12 {
+            return Ok(());
+        }
+
+        let available_rows = status_row as usize;
+        if available_rows < 2 {
+            return Ok(());
+        }
+
+        let item_rows = items.len().min(8).min(available_rows.saturating_sub(1));
+        if item_rows == 0 {
+            self.clear_leader_popup_area(editor)?;
+            return Ok(());
+        }
+
+        let popup_top_row = status_row.saturating_sub((item_rows + 1) as u16);
+        self.leader_popup_rect = Some((popup_top_row, (item_rows + 1) as u16));
+
+        let prefix_label = if prefix.is_empty() {
+            "<leader>".to_string()
+        } else {
+            format!("<leader>{prefix}")
+        };
+        let header_text = format!("[LEADER {prefix_label}] Esc:cancel");
+
+        let key_col_width = term_width.saturating_sub(4).min(16).max(8);
+        let desc_col_width = term_width.saturating_sub(key_col_width + 3);
+
+        let theme = editor.theme();
+        let popup_fg = theme.ui.foreground;
+        let popup_bg = theme.ui.popup_bg;
+        let header_fg = theme.ui.statusline_mode_normal;
+        let header_bg = theme.ui.statusline_bg;
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(0, popup_top_row),
+            terminal::Clear(ClearType::CurrentLine),
+            SetForegroundColor(header_fg),
+            SetBackgroundColor(header_bg)
+        )?;
+        let mut header_line = Self::truncate_inline(&header_text, term_width);
+        let header_len = header_line.chars().count();
+        if header_len < term_width {
+            header_line.push_str(&" ".repeat(term_width - header_len));
+        }
+        print!("{}", header_line);
+        execute!(self.stdout, ResetColor)?;
+
+        for (row_offset, item) in items.iter().take(item_rows).enumerate() {
+            let row = popup_top_row + row_offset as u16 + 1;
+            execute!(
+                self.stdout,
+                cursor::MoveTo(0, row),
+                terminal::Clear(ClearType::CurrentLine),
+                SetForegroundColor(popup_fg),
+                SetBackgroundColor(popup_bg)
+            )?;
+
+            let key_raw = if item.has_children {
+                format!("{} +", item.key)
+            } else {
+                item.key.clone()
+            };
+            let mut desc_raw = if item.description == "prefix" {
+                "more...".to_string()
+            } else {
+                item.description.clone()
+            };
+            if item.is_exact && item.has_children && !desc_raw.is_empty() {
+                desc_raw.push_str(" (more)");
+            }
+
+            let key_text = Self::truncate_inline(&key_raw, key_col_width);
+            let desc_text = Self::truncate_inline(&desc_raw, desc_col_width);
+            let mut line = format!(
+                "  {:key_width$} {}",
+                key_text,
+                desc_text,
+                key_width = key_col_width
+            );
+
+            let printed = line.chars().count();
+            if printed < term_width {
+                line.push_str(&" ".repeat(term_width - printed));
+            } else if printed > term_width {
+                line = line.chars().take(term_width).collect();
+            }
+            print!("{}", line);
+            execute!(self.stdout, ResetColor)?;
+        }
+
+        Ok(())
+    }
+
+    fn clear_leader_popup_area(&mut self, editor: &Editor) -> anyhow::Result<()> {
+        let Some((top_row, rows)) = self.leader_popup_rect.take() else {
+            return Ok(());
+        };
+
+        let max_row = editor.term_height.saturating_sub(1);
+        let end_row = top_row.saturating_add(rows).min(max_row);
+        for row in top_row..end_row {
+            execute!(
+                self.stdout,
+                cursor::MoveTo(0, row),
+                terminal::Clear(ClearType::CurrentLine)
+            )?;
+        }
+        execute!(self.stdout, ResetColor)?;
         Ok(())
     }
 
@@ -1724,11 +1870,7 @@ impl Terminal {
                 current_italic = desired_italic;
             }
             if desired_underline_color != current_underline_color {
-                apply_diagnostic_underline(
-                    &mut self.stdout,
-                    desired_underline_color,
-                    desired_fg,
-                )?;
+                apply_diagnostic_underline(&mut self.stdout, desired_underline_color, desired_fg)?;
                 current_underline_color = desired_underline_color;
             }
 
@@ -2407,6 +2549,7 @@ impl Terminal {
                     Operator::Yank => 'y',
                     Operator::Indent => '>',
                     Operator::Dedent => '<',
+                    Operator::AutoIndent => '=',
                 });
             }
             if !s.is_empty() {
@@ -3712,7 +3855,10 @@ impl Terminal {
             "0/0".to_string()
         } else {
             let start = scroll.saturating_add(1).min(total_rows);
-            let end = scroll.saturating_add(visible_rows).min(total_rows).max(start);
+            let end = scroll
+                .saturating_add(visible_rows)
+                .min(total_rows)
+                .max(start);
             if start == end {
                 format!("{start}/{total_rows}")
             } else {
@@ -3772,8 +3918,7 @@ impl Terminal {
         let content_width = (popup_width - 4) as usize;
 
         // Position at the active pane's text area, below the cursor line.
-        let (popup_x, popup_y) =
-            Self::diagnostic_float_position(editor, popup_width, popup_height);
+        let (popup_x, popup_y) = Self::diagnostic_float_position(editor, popup_width, popup_height);
 
         // Colors
         let border_color = Color::Rgb {
@@ -4030,7 +4175,12 @@ impl Terminal {
             SetAttribute(Attribute::Reset),
             SetForegroundColor(theme.ui.foreground)
         )?;
-        write!(output, "{:width$}", "", width = width.saturating_sub(written))?;
+        write!(
+            output,
+            "{:width$}",
+            "",
+            width = width.saturating_sub(written)
+        )?;
         Ok(())
     }
 
@@ -5735,11 +5885,7 @@ impl Terminal {
                 current_italic = desired_italic;
             }
             if desired_underline_color != current_underline_color {
-                apply_diagnostic_underline(
-                    &mut self.stdout,
-                    desired_underline_color,
-                    desired_fg,
-                )?;
+                apply_diagnostic_underline(&mut self.stdout, desired_underline_color, desired_fg)?;
                 current_underline_color = desired_underline_color;
             }
 
@@ -6146,6 +6292,18 @@ pub fn handle_key(editor: &mut Editor, key: KeyEvent) {
         editor.macros.record_key(key);
     }
 
+    if editor.pending_insert_normal_once && editor.mode == Mode::Normal {
+        handle_normal_mode(editor, key);
+        if !editor.input_state.has_pending_sequence() {
+            if editor.mode == Mode::Normal {
+                editor.finish_insert_normal_once();
+            } else {
+                editor.pending_insert_normal_once = false;
+            }
+        }
+        return;
+    }
+
     match editor.mode {
         Mode::Normal => handle_normal_mode(editor, key),
         Mode::Insert => handle_insert_mode(editor, key),
@@ -6295,6 +6453,7 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
                 Operator::Yank => editor.yank_motion(motion, count, register),
                 Operator::Indent => editor.indent_motion(motion, count),
                 Operator::Dedent => editor.dedent_motion(motion, count),
+                Operator::AutoIndent => editor.auto_indent_motion(motion, count),
             }
         }
 
@@ -6309,6 +6468,7 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
                 Operator::Yank => editor.yank_line(count, register),
                 Operator::Indent => editor.indent_line(count),
                 Operator::Dedent => editor.dedent_line(count),
+                Operator::AutoIndent => editor.auto_indent_line(count),
             }
         }
 
@@ -6323,6 +6483,7 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
                 Operator::Yank => editor.yank_text_object(text_object, register),
                 Operator::Indent => editor.indent_text_object(text_object),
                 Operator::Dedent => editor.dedent_text_object(text_object),
+                Operator::AutoIndent => editor.auto_indent_text_object(text_object),
             }
         }
 
@@ -6452,6 +6613,22 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
             editor.paste_before_count(register, count);
         }
 
+        KeyAction::PasteAfterMove(count) => {
+            let register = editor
+                .input_state
+                .take_register()
+                .or(register_before_action);
+            editor.paste_after_move_count(register, count);
+        }
+
+        KeyAction::PasteBeforeMove(count) => {
+            let register = editor
+                .input_state
+                .take_register()
+                .or(register_before_action);
+            editor.paste_before_move_count(register, count);
+        }
+
         KeyAction::Undo => {
             editor.undo();
         }
@@ -6518,6 +6695,14 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
 
         KeyAction::SearchWordBackward => {
             editor.search_word_backward();
+        }
+
+        KeyAction::SearchSelectNext(count) => {
+            editor.search_select_next(count);
+        }
+
+        KeyAction::SearchSelectPrev(count) => {
+            editor.search_select_prev(count);
         }
 
         KeyAction::EnterVisual => {
@@ -6594,9 +6779,43 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
             editor.move_to_pane_direction(PaneDirection::Down);
         }
 
+        KeyAction::WindowEqualize => {
+            editor.equalize_windows();
+        }
+
+        KeyAction::WindowRotateDownRight => {
+            editor.rotate_windows_down_right();
+        }
+
+        KeyAction::WindowRotateUpLeft => {
+            editor.rotate_windows_up_left();
+        }
+
+        KeyAction::WindowExchangeNext => {
+            editor.exchange_window_with_next();
+        }
+
         KeyAction::GotoDefinition => {
             editor.pending_lsp_action = Some(crate::editor::LspAction::GotoDefinition);
         }
+
+        KeyAction::GotoDeclaration => {
+            editor.pending_lsp_action = Some(crate::editor::LspAction::GotoDeclaration);
+        }
+
+        KeyAction::GotoImplementation => {
+            editor.pending_lsp_action = Some(crate::editor::LspAction::GotoImplementation);
+        }
+
+        KeyAction::GotoFile => match editor.open_file_under_cursor() {
+            Ok(path) => editor.set_status(format!("Opened {}", path.display())),
+            Err(err) => editor.set_status(err),
+        },
+
+        KeyAction::OpenUrl => match editor.open_url_under_cursor() {
+            Ok(url) => editor.set_status(format!("Opened {}", url)),
+            Err(err) => editor.set_status(err),
+        },
 
         KeyAction::Hover => {
             editor.pending_lsp_action = Some(crate::editor::LspAction::Hover);
@@ -6628,8 +6847,38 @@ fn handle_normal_mode(editor: &mut Editor, key: KeyEvent) {
         }
 
         KeyAction::JumpToPreviousPosition => {
-            if !editor.jump_to_previous_position() {
+            if !editor.jump_to_previous_position_line() {
                 editor.set_status("No previous jump position");
+            }
+        }
+
+        KeyAction::JumpToPreviousPositionExact => {
+            if !editor.jump_to_previous_position_exact() {
+                editor.set_status("No previous jump position");
+            }
+        }
+
+        KeyAction::JumpToLastChange => {
+            if !editor.jump_to_last_change_line() {
+                editor.set_status("No last change position");
+            }
+        }
+
+        KeyAction::JumpToLastChangeExact => {
+            if !editor.jump_to_last_change_exact() {
+                editor.set_status("No last change position");
+            }
+        }
+
+        KeyAction::JumpToLastInsert => {
+            if !editor.jump_to_last_insert_line() {
+                editor.set_status("No previous insert position");
+            }
+        }
+
+        KeyAction::JumpToLastInsertExact => {
+            if !editor.jump_to_last_insert_exact() {
+                editor.set_status("No previous insert position");
             }
         }
 
@@ -6856,6 +7105,18 @@ fn handle_insert_mode(editor: &mut Editor, key: KeyEvent) {
     // Apply custom keymap remapping for insert mode
     let key = editor.keymap.remap_insert(key);
 
+    if editor.pending_insert_register {
+        editor.pending_insert_register = false;
+        match (key.modifiers, key.code) {
+            (KeyModifiers::NONE, KeyCode::Esc) | (KeyModifiers::CONTROL, KeyCode::Char('[')) => {}
+            (_, KeyCode::Char(register)) => {
+                editor.insert_register_text(register);
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // If completion popup is active, handle completion keys first
     if editor.completion.active {
         match (key.modifiers, key.code) {
@@ -7006,6 +7267,31 @@ fn handle_insert_mode(editor: &mut Editor, key: KeyEvent) {
         // Delete to start of line (Ctrl+u)
         (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
             editor.delete_to_line_start();
+        }
+
+        // Increase indentation of current line (Ctrl+t)
+        (KeyModifiers::CONTROL, KeyCode::Char('t')) => {
+            editor.indent_current_line_in_insert_mode();
+        }
+
+        // Decrease indentation of current line (Ctrl+d)
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            editor.dedent_current_line_in_insert_mode();
+        }
+
+        // Insert previously inserted text (Ctrl+a)
+        (KeyModifiers::CONTROL, KeyCode::Char('a')) => {
+            editor.insert_last_inserted_text();
+        }
+
+        // Insert the contents of a register (Ctrl+r {register})
+        (KeyModifiers::CONTROL, KeyCode::Char('r')) => {
+            editor.pending_insert_register = true;
+        }
+
+        // Execute one normal-mode command, then return to insert mode (Ctrl+o)
+        (KeyModifiers::CONTROL, KeyCode::Char('o')) => {
+            editor.enter_insert_normal_once();
         }
 
         // Backspace
@@ -7470,6 +7756,9 @@ fn handle_visual_mode(editor: &mut Editor, key: KeyEvent) {
             (KeyModifiers::SHIFT, KeyCode::Char('B')) => Some(TextObjectType::Brace),
             (_, KeyCode::Char('[')) | (_, KeyCode::Char(']')) => Some(TextObjectType::Bracket),
             (_, KeyCode::Char('<')) | (_, KeyCode::Char('>')) => Some(TextObjectType::AngleBracket),
+            (KeyModifiers::NONE, KeyCode::Char('p')) => Some(TextObjectType::Paragraph),
+            (KeyModifiers::NONE, KeyCode::Char('s')) => Some(TextObjectType::Sentence),
+            (KeyModifiers::NONE, KeyCode::Char('t')) => Some(TextObjectType::Tag),
             _ => None,
         };
 
@@ -7623,6 +7912,12 @@ fn handle_visual_mode(editor: &mut Editor, key: KeyEvent) {
             editor.cursor.col = old_anchor_col;
             editor.scroll_to_cursor();
         }
+        (KeyModifiers::SHIFT, KeyCode::Char('O')) if editor.mode == Mode::VisualBlock => {
+            let old_anchor_col = editor.visual.anchor_col;
+            editor.visual.anchor_col = editor.cursor.col;
+            editor.cursor.col = old_anchor_col;
+            editor.scroll_to_cursor();
+        }
 
         // Text object selection (i = inner, a = around)
         (KeyModifiers::NONE, KeyCode::Char('i')) => {
@@ -7679,6 +7974,17 @@ fn execute_visual_keymap_action(editor: &mut Editor, action: &LeaderAction) {
     }
 }
 
+fn finder_preview_scroll_amount(editor: &Editor) -> usize {
+    let preview_enabled = editor.finder.preview_enabled && editor.finder.mode_supports_preview();
+    let win = crate::finder::FloatingWindow::centered_with_preview(
+        editor.term_width,
+        editor.term_height,
+        preview_enabled,
+    );
+    let visible_rows = win.height.saturating_sub(4) as usize;
+    (visible_rows / 2).max(1)
+}
+
 fn handle_finder_mode(editor: &mut Editor, key: KeyEvent) {
     let t_start = Instant::now();
 
@@ -7709,6 +8015,18 @@ fn handle_finder_mode(editor: &mut Editor, key: KeyEvent) {
                 // Mark preview as needing immediate update (skip debounce on toggle)
                 editor.update_finder_preview();
             }
+        }
+
+        // Scroll preview panel down - Ctrl+d (works in both modes)
+        (KeyModifiers::CONTROL, KeyCode::Char('d')) => {
+            let amount = finder_preview_scroll_amount(editor);
+            editor.finder.scroll_preview_down(amount);
+        }
+
+        // Scroll preview panel up - Ctrl+u (works in both modes)
+        (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+            let amount = finder_preview_scroll_amount(editor);
+            editor.finder.scroll_preview_up(amount);
         }
 
         // Cancel finder - Ctrl+c always closes
@@ -8781,6 +9099,15 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
             }
         }
 
+        Command::BufferDelete(force) => {
+            if !force && editor.has_unsaved_changes() {
+                CommandResult::Error("No write since last change (add ! to override)".to_string())
+            } else {
+                editor.close_current_buffer();
+                CommandResult::Message("Buffer deleted".to_string())
+            }
+        }
+
         Command::Set(option, _value) => CommandResult::Error(format!("Unknown option: {}", option)),
 
         Command::LazyGit => CommandResult::RunExternal("lazygit".to_string()),
@@ -9184,6 +9511,10 @@ fn execute_command(editor: &mut Editor, cmd: Command) {
 
 /// Execute a leader key action
 pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
+    editor.leader_sequence = None;
+    editor.leader_sequence_start = None;
+    editor.leader_pending_action = None;
+
     match action {
         LeaderAction::Command(cmd_str) => {
             // Parse and execute the command
@@ -9203,12 +9534,13 @@ pub fn execute_leader_action(editor: &mut Editor, action: &LeaderAction) {
 mod tests {
     use super::{
         apply_diagnostic_underline, diagnostic_at_col, diagnostic_underline_color, execute_command,
-        finder_preview_match_ranges, handle_insert_mode, handle_key, replace_completion_text,
-        Terminal,
+        execute_leader_action, finder_preview_match_ranges, handle_insert_mode, handle_key,
+        replace_completion_text, Terminal,
     };
     use crate::commands::Command;
     use crate::config::{KeymapEntry, Settings};
     use crate::editor::{Editor, Mode, RegisterContent};
+    use crate::finder::FinderMode;
     use crate::input::Motion;
     use crate::lsp::types::{CompletionItem, CompletionKind, Diagnostic, DiagnosticSeverity};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -9230,6 +9562,10 @@ mod tests {
 
     fn esc_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+    }
+
+    fn numbered_lines(count: usize) -> Vec<String> {
+        (1..=count).map(|line| format!("line {}", line)).collect()
     }
 
     #[test]
@@ -9456,7 +9792,10 @@ mod tests {
         editor.replace_buffer_content(&(0..30).map(|i| format!("line {i}\n")).collect::<String>());
         editor.open_markdown_preview().expect("open preview");
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        );
         assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, 1);
 
         handle_key(
@@ -9465,7 +9804,10 @@ mod tests {
         );
         assert!(editor.markdown_preview.as_ref().unwrap().scroll > 1);
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+        );
         assert!(editor.markdown_preview.is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -9484,7 +9826,10 @@ mod tests {
         editor.replace_buffer_content(&(0..50).map(|i| format!("line {i}\n")).collect::<String>());
         editor.open_markdown_preview().expect("open preview");
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+        );
         let visible_rows = Terminal::markdown_preview_visible_rows(&editor).max(1);
         let max_scroll = editor
             .markdown_preview
@@ -9493,7 +9838,10 @@ mod tests {
             .max_scroll(visible_rows);
         assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, max_scroll);
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         assert_eq!(editor.markdown_preview.as_ref().unwrap().scroll, 0);
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -9570,6 +9918,53 @@ mod tests {
 
         assert_eq!(popup_x, active_pane.rect.x + 2 + line_num_width + 1 + 4);
         assert_eq!(popup_y, active_pane.rect.y + 2);
+    }
+
+    #[test]
+    fn normal_ctrl_w_equal_equalizes_windows() {
+        let mut editor = Editor::default();
+        editor.set_size(100, 20);
+        editor.vsplit(None).expect("split");
+
+        handle_key(&mut editor, ctrl_key('w'));
+        handle_key(&mut editor, key('='));
+
+        assert_eq!(editor.panes().len(), 2);
+        assert_eq!(editor.status_message.as_deref(), Some("Windows equalized"));
+    }
+
+    #[test]
+    fn normal_ctrl_w_r_and_shift_r_rotate_windows() {
+        let mut editor = Editor::default();
+        editor.set_size(100, 20);
+        editor.vsplit(None).expect("first split");
+        editor.vsplit(None).expect("second split");
+
+        handle_key(&mut editor, ctrl_key('w'));
+        handle_key(&mut editor, key('r'));
+
+        assert_eq!(editor.status_message.as_deref(), Some("Windows rotated"));
+
+        handle_key(&mut editor, ctrl_key('w'));
+        handle_key(&mut editor, shift_key('R'));
+
+        assert_eq!(
+            editor.status_message.as_deref(),
+            Some("Windows rotated reverse")
+        );
+    }
+
+    #[test]
+    fn normal_ctrl_w_x_exchanges_window() {
+        let mut editor = Editor::default();
+        editor.set_size(100, 20);
+        editor.vsplit(None).expect("first split");
+        editor.vsplit(None).expect("second split");
+
+        handle_key(&mut editor, ctrl_key('w'));
+        handle_key(&mut editor, key('x'));
+
+        assert_eq!(editor.status_message.as_deref(), Some("Windows exchanged"));
     }
 
     #[test]
@@ -9654,6 +10049,44 @@ mod tests {
     }
 
     #[test]
+    fn buffer_delete_closes_clean_buffer_and_refuses_dirty_buffer_without_force() {
+        let tmp = unique_temp_dir("nevi_buffer_delete");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let dirty = tmp.join("dirty.rs");
+        let clean = tmp.join("clean.rs");
+        std::fs::write(&dirty, "fn dirty() {}\n").expect("write dirty");
+        std::fs::write(&clean, "fn clean() {}\n").expect("write clean");
+
+        let mut editor = Editor::default();
+        editor.open_file(dirty.clone()).expect("open dirty");
+        editor.buffer_mut().insert_char(0, 0, 'x');
+        editor.open_file(clean.clone()).expect("open clean");
+        assert_eq!(editor.buffer_count(), 2);
+
+        execute_command(&mut editor, Command::BufferDelete(false));
+
+        assert_eq!(editor.buffer_count(), 1);
+        assert_eq!(editor.buffer().path.as_ref(), Some(&dirty));
+
+        execute_command(&mut editor, Command::BufferDelete(false));
+
+        assert_eq!(editor.buffer_count(), 1);
+        assert_eq!(editor.buffer().path.as_ref(), Some(&dirty));
+        assert!(editor
+            .status_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("No write since last change"));
+
+        execute_command(&mut editor, Command::BufferDelete(true));
+
+        assert_eq!(editor.buffer_count(), 1);
+        assert!(editor.buffer().path.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn active_completion_prefix_changes_request_lsp_refresh() {
         let mut editor = Editor::default();
         editor.replace_buffer_content("us\n");
@@ -9669,6 +10102,36 @@ mod tests {
         assert_eq!(editor.buffer().content(), "usE\n");
         assert_eq!(editor.completion.filter_text, "usE");
         assert!(editor.needs_completion_refresh);
+    }
+
+    #[test]
+    fn insert_ctrl_t_indents_current_line_and_keeps_insert_position() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("  alpha\nbeta\n");
+        editor.mode = Mode::Insert;
+        editor.cursor.line = 0;
+        editor.cursor.col = 7;
+
+        handle_insert_mode(&mut editor, ctrl_key('t'));
+
+        assert_eq!(editor.buffer().content(), "      alpha\nbeta\n");
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 11));
+    }
+
+    #[test]
+    fn insert_ctrl_d_dedents_current_line_and_keeps_insert_position() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("      alpha\nbeta\n");
+        editor.mode = Mode::Insert;
+        editor.cursor.line = 0;
+        editor.cursor.col = 11;
+
+        handle_insert_mode(&mut editor, ctrl_key('d'));
+
+        assert_eq!(editor.buffer().content(), "  alpha\nbeta\n");
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 7));
     }
 
     #[test]
@@ -9712,7 +10175,10 @@ mod tests {
         assert_eq!(editor.finder.cursor, 1);
         assert_eq!(editor.finder.selected, 0);
         assert_eq!(
-            editor.finder.selected_item().map(|item| item.display.as_str()),
+            editor
+                .finder
+                .selected_item()
+                .map(|item| item.display.as_str()),
             Some("2: beta.rs")
         );
 
@@ -9758,6 +10224,30 @@ mod tests {
     }
 
     #[test]
+    fn finder_preview_ctrl_d_and_ctrl_u_scroll_preview_without_changing_query_or_selection() {
+        let mut editor = Editor::default();
+        editor.set_size(100, 30);
+        editor.finder.open_harpoon(vec![PathBuf::from("alpha.rs")]);
+        editor.mode = Mode::Finder;
+        editor.finder.preview_enabled = true;
+        editor
+            .finder
+            .set_preview_content(PathBuf::from("alpha.rs"), numbered_lines(40));
+
+        handle_key(&mut editor, ctrl_key('d'));
+
+        assert_eq!(editor.finder.preview_scroll, 8);
+        assert_eq!(editor.finder.query, "");
+        assert_eq!(editor.finder.selected, 0);
+
+        handle_key(&mut editor, ctrl_key('u'));
+
+        assert_eq!(editor.finder.preview_scroll, 0);
+        assert_eq!(editor.finder.query, "");
+        assert_eq!(editor.finder.selected, 0);
+    }
+
+    #[test]
     fn finder_enter_opens_selected_buffer_item() {
         let tmp = unique_temp_dir("nevi_finder_buffer_select");
         std::fs::create_dir_all(&tmp).expect("create temp dir");
@@ -9772,7 +10262,10 @@ mod tests {
         assert_eq!(editor.current_buffer_index(), 1);
 
         editor.open_finder_buffers();
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
 
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.current_buffer_index(), 0);
@@ -9788,13 +10281,19 @@ mod tests {
         std::fs::write(&path, "fn changed() {}\n").expect("write file");
 
         let mut editor = Editor::default();
-        editor.finder.open_git_changes(vec![
-            crate::finder::FinderItem::new("M changed.rs".to_string(), path.clone())
-                .with_git_status(crate::git::GitFileStatus::Modified),
-        ]);
+        editor
+            .finder
+            .open_git_changes(vec![crate::finder::FinderItem::new(
+                "M changed.rs".to_string(),
+                path.clone(),
+            )
+            .with_git_status(crate::git::GitFileStatus::Modified)]);
         editor.mode = Mode::Finder;
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
 
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.buffer().path.as_ref(), Some(&path));
@@ -9809,18 +10308,173 @@ mod tests {
         let path = tmp.join("deleted.rs");
 
         let mut editor = Editor::default();
-        editor.finder.open_git_changes(vec![
-            crate::finder::FinderItem::new("D deleted.rs".to_string(), path)
-                .with_git_status(crate::git::GitFileStatus::Deleted),
-        ]);
+        editor
+            .finder
+            .open_git_changes(vec![crate::finder::FinderItem::new(
+                "D deleted.rs".to_string(),
+                path,
+            )
+            .with_git_status(crate::git::GitFileStatus::Deleted)]);
         editor.mode = Mode::Finder;
 
-        handle_key(&mut editor, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_key(
+            &mut editor,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
 
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.status_message.as_deref(), Some("File was deleted"));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_gf_opens_file_under_cursor_relative_to_current_file() {
+        let tmp = unique_temp_dir("nevi_gf_file_under_cursor");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let current = tmp.join("current.txt");
+        let target = tmp.join("target.txt");
+        std::fs::write(&current, "open target.txt now\n").expect("write current");
+        std::fs::write(&target, "target file\n").expect("write target");
+
+        let mut editor = Editor::default();
+        editor.open_file(current.clone()).expect("open current");
+        editor.cursor.line = 0;
+        editor.cursor.col = 7;
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('f'));
+
+        assert_eq!(editor.buffer().path.as_ref(), Some(&target));
+        assert_eq!(editor.buffer().content(), "target file\n");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_gx_reports_missing_url_under_cursor() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("not a url\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 2;
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('x'));
+
+        assert_eq!(
+            editor.status_message.as_deref(),
+            Some("No URL under cursor")
+        );
+    }
+
+    #[test]
+    fn normal_g_shift_d_sets_goto_declaration_lsp_action() {
+        let mut editor = Editor::default();
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, shift_key('D'));
+
+        assert_eq!(
+            format!("{:?}", editor.pending_lsp_action),
+            "Some(GotoDeclaration)"
+        );
+    }
+
+    #[test]
+    fn normal_g_shift_i_sets_goto_implementation_lsp_action() {
+        let mut editor = Editor::default();
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, shift_key('I'));
+
+        assert_eq!(
+            format!("{:?}", editor.pending_lsp_action),
+            "Some(GotoImplementation)"
+        );
+    }
+
+    #[test]
+    fn normal_apostrophe_apostrophe_jumps_to_previous_jump_line_first_non_blank() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  previous spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.previous_jump_position = Some((None, 1, 11));
+
+        handle_key(&mut editor, key('\''));
+        handle_key(&mut editor, key('\''));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 2));
+    }
+
+    #[test]
+    fn normal_backtick_backtick_jumps_to_previous_jump_exact_position() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  previous spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.previous_jump_position = Some((None, 1, 11));
+
+        handle_key(&mut editor, key('`'));
+        handle_key(&mut editor, key('`'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 11));
+    }
+
+    #[test]
+    fn normal_apostrophe_dot_jumps_to_last_change_line_first_non_blank() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  changed spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.change_list.record(1, 10);
+
+        handle_key(&mut editor, key('\''));
+        handle_key(&mut editor, key('.'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 2));
+    }
+
+    #[test]
+    fn normal_backtick_dot_jumps_to_last_change_exact_position() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  changed spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.change_list.record(1, 10);
+
+        handle_key(&mut editor, key('`'));
+        handle_key(&mut editor, key('.'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 10));
+    }
+
+    #[test]
+    fn normal_apostrophe_caret_jumps_to_last_insert_line_first_non_blank() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  insert spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.last_insert_position = Some((1, 10));
+
+        handle_key(&mut editor, key('\''));
+        handle_key(&mut editor, key('^'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 2));
+    }
+
+    #[test]
+    fn normal_backtick_caret_jumps_to_last_insert_exact_position() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("current\n  insert spot\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+        editor.last_insert_position = Some((1, 10));
+
+        handle_key(&mut editor, key('`'));
+        handle_key(&mut editor, key('^'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 10));
     }
 
     #[test]
@@ -9836,11 +10490,17 @@ mod tests {
         editor.open_finder_harpoon();
         editor.finder.selected = 1;
         handle_key(&mut editor, shift_key('K'));
-        assert_eq!(editor.harpoon.files(), [two.clone(), one.clone(), three.clone()]);
+        assert_eq!(
+            editor.harpoon.files(),
+            [two.clone(), one.clone(), three.clone()]
+        );
         assert_eq!(editor.finder.selected, 0);
 
         handle_key(&mut editor, shift_key('J'));
-        assert_eq!(editor.harpoon.files(), [one.clone(), two.clone(), three.clone()]);
+        assert_eq!(
+            editor.harpoon.files(),
+            [one.clone(), two.clone(), three.clone()]
+        );
         assert_eq!(editor.finder.selected, 1);
 
         handle_key(&mut editor, key('d'));
@@ -9868,6 +10528,200 @@ mod tests {
         handle_key(&mut editor, key('x'));
 
         assert_eq!(editor.buffer().content(), "d\n");
+    }
+
+    #[test]
+    fn normal_plus_minus_move_to_first_non_blank_on_target_line() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("zero\n    one\n  two\nthree\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 2;
+
+        handle_key(&mut editor, key('+'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 4));
+
+        handle_key(&mut editor, key('+'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (2, 2));
+
+        handle_key(&mut editor, key('-'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 4));
+
+        let mut counted = Editor::default();
+        counted.replace_buffer_content("zero\n    one\n  two\nthree\n");
+        counted.cursor.line = 0;
+        counted.cursor.col = 2;
+
+        handle_key(&mut counted, key('2'));
+        handle_key(&mut counted, key('+'));
+
+        assert_eq!((counted.cursor.line, counted.cursor.col), (2, 2));
+    }
+
+    #[test]
+    fn normal_gj_gk_move_by_wrapped_display_lines() {
+        let mut editor = Editor::default();
+        editor.set_size(40, 12);
+        editor.settings.editor.wrap = true;
+        editor.settings.editor.wrap_width = 5;
+        editor.settings.editor.line_numbers = false;
+        editor.replace_buffer_content("abcdefghij\nklmno\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 1;
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('j'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 6));
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('j'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 1));
+
+        handle_key(&mut editor, key('2'));
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('k'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 1));
+    }
+
+    #[test]
+    fn normal_g0_g_dollar_g_caret_target_current_wrapped_row() {
+        let mut editor = Editor::default();
+        editor.set_size(40, 12);
+        editor.settings.editor.wrap = true;
+        editor.settings.editor.wrap_width = 5;
+        editor.settings.editor.line_numbers = false;
+        editor.replace_buffer_content("  abcdefghij\n");
+        editor.cursor.line = 0;
+
+        editor.cursor.col = 6;
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('0'));
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+
+        editor.cursor.col = 6;
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('$'));
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 7));
+
+        editor.cursor.col = 6;
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('^'));
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+    }
+
+    #[test]
+    fn normal_equal_equal_auto_indents_current_line() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("fn main() {\nprintln!(\"hi\");\n}\n");
+        editor.cursor.line = 1;
+
+        handle_key(&mut editor, key('='));
+        handle_key(&mut editor, key('='));
+
+        assert_eq!(
+            editor.buffer().content(),
+            "fn main() {\n    println!(\"hi\");\n}\n"
+        );
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 4));
+    }
+
+    #[test]
+    fn normal_equal_motion_auto_indents_motion_line_range() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content(
+            "fn main() {\nprintln!(\"hi\");\nif true {\nprintln!(\"nested\");\n}\n}\n",
+        );
+        editor.cursor.line = 1;
+
+        handle_key(&mut editor, key('='));
+        handle_key(&mut editor, key('j'));
+
+        assert_eq!(
+            editor.buffer().content(),
+            "fn main() {\n    println!(\"hi\");\n    if true {\nprintln!(\"nested\");\n}\n}\n"
+        );
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 4));
+    }
+
+    #[test]
+    fn normal_gn_selects_next_search_match() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("alpha target beta\ntarget gamma\n");
+        editor.search.last_pattern = Some("target".to_string());
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('n'));
+
+        assert_eq!(editor.mode, Mode::Visual);
+        assert_eq!(editor.get_visual_range(), (0, 6, 0, 11));
+
+        handle_key(&mut editor, key('y'));
+
+        assert_eq!(
+            editor.registers.get(None),
+            Some(&RegisterContent::Chars("target".to_string()))
+        );
+    }
+
+    #[test]
+    fn normal_g_shift_n_selects_previous_search_match() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("target alpha\nmiddle\ngamma target\n");
+        editor.search.last_pattern = Some("target".to_string());
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, shift_key('N'));
+
+        assert_eq!(editor.mode, Mode::Visual);
+        assert_eq!(editor.get_visual_range(), (0, 0, 0, 5));
+
+        handle_key(&mut editor, key('y'));
+
+        assert_eq!(
+            editor.registers.get(None),
+            Some(&RegisterContent::Chars("target".to_string()))
+        );
+    }
+
+    #[test]
+    fn normal_paren_motions_move_between_sentence_starts() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("First sentence. Second sentence! Third sentence?\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 3;
+
+        handle_key(&mut editor, key(')'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 16));
+
+        handle_key(&mut editor, key(')'));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 33));
+
+        handle_key(&mut editor, key('('));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 16));
+
+        handle_key(&mut editor, key('('));
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 0));
+
+        let mut counted = Editor::default();
+        counted.replace_buffer_content("First sentence. Second sentence! Third sentence?\n");
+
+        handle_key(&mut counted, key('2'));
+        handle_key(&mut counted, key(')'));
+
+        assert_eq!((counted.cursor.line, counted.cursor.col), (0, 33));
     }
 
     #[test]
@@ -10017,14 +10871,20 @@ mod tests {
 
         handle_key(&mut editor, key('v'));
         assert_eq!(editor.mode, Mode::Visual);
-        assert_eq!((editor.visual.anchor_line, editor.visual.anchor_col), (0, 0));
+        assert_eq!(
+            (editor.visual.anchor_line, editor.visual.anchor_col),
+            (0, 0)
+        );
 
         handle_key(&mut editor, key('l'));
         assert_eq!(editor.get_visual_range(), (0, 0, 0, 1));
 
         handle_key(&mut editor, key('o'));
         assert_eq!((editor.cursor.line, editor.cursor.col), (0, 0));
-        assert_eq!((editor.visual.anchor_line, editor.visual.anchor_col), (0, 1));
+        assert_eq!(
+            (editor.visual.anchor_line, editor.visual.anchor_col),
+            (0, 1)
+        );
         assert_eq!(editor.get_visual_range(), (0, 0, 0, 1));
 
         handle_key(&mut editor, esc_key());
@@ -10047,6 +10907,34 @@ mod tests {
         assert_eq!(editor.mode, Mode::VisualBlock);
         handle_key(&mut editor, ctrl_key('v'));
         assert_eq!(editor.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn visual_block_shift_o_moves_to_other_corner_on_cursor_line() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("abcd\nefgh\n");
+
+        handle_key(&mut editor, ctrl_key('v'));
+        handle_key(&mut editor, key('j'));
+        handle_key(&mut editor, key('l'));
+        handle_key(&mut editor, key('l'));
+        assert_eq!(editor.mode, Mode::VisualBlock);
+        assert_eq!(
+            (editor.visual.anchor_line, editor.visual.anchor_col),
+            (0, 0)
+        );
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 2));
+        assert_eq!(editor.get_visual_range(), (0, 0, 1, 2));
+
+        handle_key(&mut editor, shift_key('O'));
+
+        assert_eq!(editor.mode, Mode::VisualBlock);
+        assert_eq!(
+            (editor.visual.anchor_line, editor.visual.anchor_col),
+            (0, 2)
+        );
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 0));
+        assert_eq!(editor.get_visual_range(), (0, 0, 1, 2));
     }
 
     #[test]
@@ -10195,6 +11083,170 @@ mod tests {
     }
 
     #[test]
+    fn normal_dip_deletes_inner_paragraph_without_blank_separator() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("one\n\ntwo\nthree\n\nfour\n");
+        editor.cursor.line = 2;
+        editor.cursor.col = 1;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "one\n\n\nfour\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (2, 0));
+    }
+
+    #[test]
+    fn normal_dap_deletes_paragraph_and_following_blank_separator() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("one\n\ntwo\nthree\n\nfour\n");
+        editor.cursor.line = 2;
+        editor.cursor.col = 1;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "one\n\nfour\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (2, 0));
+    }
+
+    #[test]
+    fn normal_dis_deletes_inner_sentence_without_separator() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("Alpha one. Beta two! Gamma three?\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 14;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('s'));
+
+        assert_eq!(editor.buffer().content(), "Alpha one.  Gamma three?\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 11));
+    }
+
+    #[test]
+    fn normal_das_deletes_sentence_and_following_separator() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("Alpha one. Beta two! Gamma three?\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 14;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('s'));
+
+        assert_eq!(editor.buffer().content(), "Alpha one. Gamma three?\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 11));
+    }
+
+    #[test]
+    fn visual_is_selects_and_yanks_inner_sentence() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("Alpha one. Beta two! Gamma three?\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 14;
+
+        handle_key(&mut editor, key('v'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('s'));
+        handle_key(&mut editor, key('y'));
+
+        assert_eq!(
+            editor.registers.get(None),
+            Some(&RegisterContent::Chars("Beta two!".to_string()))
+        );
+        assert_eq!(editor.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn normal_dit_deletes_inner_tag_text_object_with_attributes() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content(
+            "before <div class=\"x\">hello <span>world</span></div> after\n",
+        );
+        editor.cursor.line = 0;
+        editor.cursor.col = 24;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('t'));
+
+        assert_eq!(
+            editor.buffer().content(),
+            "before <div class=\"x\"></div> after\n"
+        );
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 22));
+    }
+
+    #[test]
+    fn normal_dat_deletes_around_tag_text_object_with_attributes() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content(
+            "before <div class=\"x\">hello <span>world</span></div> after\n",
+        );
+        editor.cursor.line = 0;
+        editor.cursor.col = 24;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('t'));
+
+        assert_eq!(editor.buffer().content(), "before  after\n");
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 7));
+    }
+
+    #[test]
+    fn normal_dit_prefers_nearest_nested_same_name_tag_text_object() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("<div>outer <div>inner</div> tail</div>\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 18;
+
+        handle_key(&mut editor, key('d'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('t'));
+
+        assert_eq!(
+            editor.buffer().content(),
+            "<div>outer <div></div> tail</div>\n"
+        );
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 16));
+    }
+
+    #[test]
+    fn visual_it_yanks_inner_tag_text_object() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content(
+            "before <div class=\"x\">hello <span>world</span></div> after\n",
+        );
+        editor.cursor.line = 0;
+        editor.cursor.col = 24;
+
+        handle_key(&mut editor, key('v'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('t'));
+        handle_key(&mut editor, key('y'));
+
+        assert_eq!(
+            editor.registers.get(None),
+            Some(&RegisterContent::Chars(
+                "hello <span>world</span>".to_string()
+            ))
+        );
+        assert_eq!(editor.mode, Mode::Normal);
+    }
+
+    #[test]
     fn change_text_object_keeps_insert_point_at_deleted_word_start() {
         let mut editor = Editor::default();
         editor.replace_buffer_content("foo bar\n");
@@ -10255,6 +11307,294 @@ mod tests {
         handle_key(&mut editor, key('p'));
 
         assert_eq!(editor.buffer().content(), "axxxb\n");
+    }
+
+    #[test]
+    fn normal_quote_percent_pastes_current_filename() {
+        let tmp = unique_temp_dir("nevi_current_filename_register");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("current.txt");
+        std::fs::write(&path, "x\n").expect("write current file");
+
+        let mut editor = Editor::default();
+        editor.open_file(path.clone()).expect("open current file");
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('%'));
+        handle_key(&mut editor, key('p'));
+
+        let expected = format!("x{}\n", path.to_string_lossy());
+        assert_eq!(editor.buffer().content(), expected);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_quote_colon_pastes_last_command() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n");
+        editor.command_line.history = vec!["write".to_string(), "buffers".to_string()];
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key(':'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "xbuffers\n");
+    }
+
+    #[test]
+    fn normal_quote_hash_pastes_alternate_filename() {
+        let tmp = unique_temp_dir("nevi_alternate_filename_register");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let first = tmp.join("first.txt");
+        let second = tmp.join("second.txt");
+        std::fs::write(&first, "first\n").expect("write first");
+        std::fs::write(&second, "x\n").expect("write second");
+
+        let mut editor = Editor::default();
+        editor.open_file(first.clone()).expect("open first");
+        editor.open_file(second).expect("open second");
+        editor.cursor.line = 0;
+        editor.cursor.col = 0;
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('#'));
+        handle_key(&mut editor, key('p'));
+
+        let expected = format!("x{}\n", first.to_string_lossy());
+        assert_eq!(editor.buffer().content(), expected);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn normal_quote_dot_pastes_last_inserted_text() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n\n");
+
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('n'));
+        handle_key(&mut editor, key('e'));
+        handle_key(&mut editor, key('v'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, esc_key());
+
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('.'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "nevix\nnevi\n");
+    }
+
+    #[test]
+    fn insert_ctrl_a_inserts_previously_inserted_text() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n\n");
+
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, key('n'));
+        handle_key(&mut editor, key('e'));
+        handle_key(&mut editor, key('v'));
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, esc_key());
+
+        editor.cursor.line = 1;
+        editor.cursor.col = 0;
+        handle_key(&mut editor, key('i'));
+        handle_key(&mut editor, ctrl_key('a'));
+
+        assert_eq!(editor.buffer().content(), "nevix\nnevi\n");
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 4));
+    }
+
+    #[test]
+    fn insert_ctrl_r_inserts_named_register_text() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("x\n");
+        editor
+            .registers
+            .yank(Some('a'), RegisterContent::Chars("nevi".to_string()));
+
+        handle_key(&mut editor, shift_key('A'));
+        handle_key(&mut editor, ctrl_key('r'));
+        handle_key(&mut editor, key('a'));
+
+        assert_eq!(editor.buffer().content(), "xnevi\n");
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+    }
+
+    #[test]
+    fn insert_ctrl_o_runs_one_normal_command_then_returns_to_insert() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("abc\n");
+
+        handle_key(&mut editor, shift_key('A'));
+        handle_key(&mut editor, ctrl_key('o'));
+        handle_key(&mut editor, key('0'));
+
+        assert_eq!(editor.mode, Mode::Insert);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 0));
+
+        handle_key(&mut editor, shift_key('X'));
+
+        assert_eq!(editor.buffer().content(), "Xabc\n");
+        assert_eq!(editor.mode, Mode::Insert);
+    }
+
+    #[test]
+    fn normal_gp_pastes_after_and_leaves_cursor_after_pasted_text() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("ab\n");
+        editor
+            .registers
+            .yank(Some('a'), RegisterContent::Chars("xy".to_string()));
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "axyb\n");
+        assert_eq!(editor.cursor.col, 3);
+    }
+
+    #[test]
+    fn normal_g_shift_p_pastes_before_and_leaves_cursor_after_pasted_text() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("ab\n");
+        editor.cursor.col = 1;
+        editor
+            .registers
+            .yank(Some('a'), RegisterContent::Chars("xy".to_string()));
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, shift_key('P'));
+
+        assert_eq!(editor.buffer().content(), "axyb\n");
+        assert_eq!(editor.cursor.col, 3);
+    }
+
+    #[test]
+    fn normal_gp_linewise_paste_leaves_cursor_after_inserted_block() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("aa\nbb\ncc\n");
+        editor.cursor.line = 1;
+        editor
+            .registers
+            .yank(Some('a'), RegisterContent::Lines("xx\n".to_string()));
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, key('p'));
+
+        assert_eq!(editor.buffer().content(), "aa\nbb\nxx\ncc\n");
+        assert_eq!((editor.cursor.line, editor.cursor.col), (3, 0));
+    }
+
+    #[test]
+    fn normal_g_shift_p_linewise_paste_leaves_cursor_after_inserted_block() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("aa\nbb\ncc\n");
+        editor.cursor.line = 1;
+        editor
+            .registers
+            .yank(Some('a'), RegisterContent::Lines("xx\n".to_string()));
+
+        handle_key(&mut editor, key('"'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key('g'));
+        handle_key(&mut editor, shift_key('P'));
+
+        assert_eq!(editor.buffer().content(), "aa\nxx\nbb\ncc\n");
+        assert_eq!((editor.cursor.line, editor.cursor.col), (2, 0));
+    }
+
+    #[test]
+    fn normal_leader_popup_items_follow_current_prefix() {
+        let mut editor = Editor::default();
+
+        handle_key(&mut editor, key(' '));
+
+        assert_eq!(editor.leader_sequence.as_deref(), Some(""));
+        let root_items = editor.leader_popup_items();
+        assert!(root_items
+            .iter()
+            .any(|item| item.key == "f" && item.has_children));
+        assert!(root_items
+            .iter()
+            .any(|item| item.key == "w" && item.description == "Save file"));
+
+        handle_key(&mut editor, key('f'));
+
+        assert_eq!(editor.leader_sequence.as_deref(), Some("f"));
+        let file_items = editor.leader_popup_items();
+        assert!(file_items
+            .iter()
+            .any(|item| item.key == "f" && item.sequence == "ff"));
+        assert!(file_items
+            .iter()
+            .any(|item| item.key == "k" && item.description == "Search keymaps"));
+    }
+
+    #[test]
+    fn normal_leader_popup_items_respect_config_toggle() {
+        let mut editor = Editor::default();
+        editor.settings.keymap.show_leader_popup = false;
+
+        handle_key(&mut editor, key(' '));
+
+        assert_eq!(editor.leader_sequence.as_deref(), Some(""));
+        assert!(editor.leader_popup_items().is_empty());
+    }
+
+    #[test]
+    fn leader_popup_items_are_hidden_while_finder_owns_ui() {
+        let mut editor = Editor::default();
+        editor.mode = Mode::Finder;
+        editor.leader_sequence = Some("f".to_string());
+
+        assert!(editor.leader_popup_items().is_empty());
+    }
+
+    #[test]
+    fn normal_leader_mapping_clears_popup_state_when_opening_finder() {
+        let mut editor = Editor::default();
+
+        handle_key(&mut editor, key(' '));
+        handle_key(&mut editor, key('f'));
+        handle_key(&mut editor, key('f'));
+
+        assert_eq!(editor.mode, Mode::Finder);
+        assert_eq!(editor.finder.mode, FinderMode::Files);
+        assert!(editor.leader_sequence.is_none());
+        assert!(editor.leader_popup_items().is_empty());
+    }
+
+    #[test]
+    fn executing_leader_action_clears_stale_popup_state() {
+        let mut editor = Editor::default();
+        editor.leader_sequence = Some("f".to_string());
+        editor.leader_sequence_start = Some(std::time::Instant::now());
+        editor.leader_pending_action = editor.keymap.get_leader_action("f").cloned();
+        let action = editor.keymap.get_leader_action("ff").cloned().unwrap();
+
+        execute_leader_action(&mut editor, &action);
+
+        assert_eq!(editor.mode, Mode::Finder);
+        assert_eq!(editor.finder.mode, FinderMode::Files);
+        assert!(editor.leader_sequence.is_none());
+        assert!(editor.leader_popup_items().is_empty());
     }
 
     #[test]

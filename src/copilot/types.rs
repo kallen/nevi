@@ -145,7 +145,9 @@ pub enum CopilotRequestKind {
     Initialize,
     CheckStatus,
     SignInInitiate,
-    SignInConfirm { user_code: String },
+    SignInConfirm {
+        user_code: String,
+    },
     GetCompletions {
         uri: String,
         version: i32,

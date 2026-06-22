@@ -11,7 +11,11 @@ pub struct SyntaxStyle {
 
 impl SyntaxStyle {
     pub fn new(fg: Color) -> Self {
-        Self { fg, bold: false, italic: false }
+        Self {
+            fg,
+            bold: false,
+            italic: false,
+        }
     }
 
     pub fn with_italic(mut self) -> Self {
@@ -103,27 +107,168 @@ impl Theme {
         let mut styles = HashMap::new();
 
         // One Dark inspired colors
-        styles.insert(HighlightGroup::Keyword, SyntaxStyle::new(Color::Rgb { r: 198, g: 120, b: 221 }));    // Purple
-        styles.insert(HighlightGroup::Function, SyntaxStyle::new(Color::Rgb { r: 97, g: 175, b: 239 }));    // Blue
-        styles.insert(HighlightGroup::Type, SyntaxStyle::new(Color::Rgb { r: 229, g: 192, b: 123 }));       // Yellow
-        styles.insert(HighlightGroup::String, SyntaxStyle::new(Color::Rgb { r: 152, g: 195, b: 121 }));     // Green
-        styles.insert(HighlightGroup::Number, SyntaxStyle::new(Color::Rgb { r: 209, g: 154, b: 102 }));     // Orange
-        styles.insert(HighlightGroup::Comment, SyntaxStyle::new(Color::Rgb { r: 92, g: 99, b: 112 }).with_italic());  // Gray, italic
-        styles.insert(HighlightGroup::Operator, SyntaxStyle::new(Color::Rgb { r: 86, g: 182, b: 194 }));    // Cyan
-        styles.insert(HighlightGroup::Punctuation, SyntaxStyle::new(Color::Rgb { r: 171, g: 178, b: 191 })); // Light gray
-        styles.insert(HighlightGroup::Variable, SyntaxStyle::new(Color::Rgb { r: 224, g: 108, b: 117 }));   // Red
-        styles.insert(HighlightGroup::Constant, SyntaxStyle::new(Color::Rgb { r: 209, g: 154, b: 102 }));   // Orange
-        styles.insert(HighlightGroup::Attribute, SyntaxStyle::new(Color::Rgb { r: 229, g: 192, b: 123 }));  // Yellow
-        styles.insert(HighlightGroup::Namespace, SyntaxStyle::new(Color::Rgb { r: 97, g: 175, b: 239 }));   // Blue
-        styles.insert(HighlightGroup::Label, SyntaxStyle::new(Color::Rgb { r: 224, g: 108, b: 117 }));      // Red
-        styles.insert(HighlightGroup::Property, SyntaxStyle::new(Color::Rgb { r: 224, g: 108, b: 117 }));   // Red
-        styles.insert(HighlightGroup::Tag, SyntaxStyle::new(Color::Rgb { r: 224, g: 108, b: 117 }));        // Red (JSX/HTML tags)
-        styles.insert(HighlightGroup::Embedded, SyntaxStyle::new(Color::Rgb { r: 86, g: 182, b: 194 }));    // Cyan (template string interpolations)
-        // New groups for improved Rust highlighting
-        styles.insert(HighlightGroup::Macro, SyntaxStyle::new(Color::Rgb { r: 86, g: 182, b: 194 }));       // Cyan
-        styles.insert(HighlightGroup::Method, SyntaxStyle::new(Color::Rgb { r: 97, g: 175, b: 239 }));      // Blue
-        styles.insert(HighlightGroup::Constructor, SyntaxStyle::new(Color::Rgb { r: 86, g: 182, b: 194 })); // Cyan
-        styles.insert(HighlightGroup::Boolean, SyntaxStyle::new(Color::Rgb { r: 209, g: 154, b: 102 }));    // Orange
+        styles.insert(
+            HighlightGroup::Keyword,
+            SyntaxStyle::new(Color::Rgb {
+                r: 198,
+                g: 120,
+                b: 221,
+            }),
+        ); // Purple
+        styles.insert(
+            HighlightGroup::Function,
+            SyntaxStyle::new(Color::Rgb {
+                r: 97,
+                g: 175,
+                b: 239,
+            }),
+        ); // Blue
+        styles.insert(
+            HighlightGroup::Type,
+            SyntaxStyle::new(Color::Rgb {
+                r: 229,
+                g: 192,
+                b: 123,
+            }),
+        ); // Yellow
+        styles.insert(
+            HighlightGroup::String,
+            SyntaxStyle::new(Color::Rgb {
+                r: 152,
+                g: 195,
+                b: 121,
+            }),
+        ); // Green
+        styles.insert(
+            HighlightGroup::Number,
+            SyntaxStyle::new(Color::Rgb {
+                r: 209,
+                g: 154,
+                b: 102,
+            }),
+        ); // Orange
+        styles.insert(
+            HighlightGroup::Comment,
+            SyntaxStyle::new(Color::Rgb {
+                r: 92,
+                g: 99,
+                b: 112,
+            })
+            .with_italic(),
+        ); // Gray, italic
+        styles.insert(
+            HighlightGroup::Operator,
+            SyntaxStyle::new(Color::Rgb {
+                r: 86,
+                g: 182,
+                b: 194,
+            }),
+        ); // Cyan
+        styles.insert(
+            HighlightGroup::Punctuation,
+            SyntaxStyle::new(Color::Rgb {
+                r: 171,
+                g: 178,
+                b: 191,
+            }),
+        ); // Light gray
+        styles.insert(
+            HighlightGroup::Variable,
+            SyntaxStyle::new(Color::Rgb {
+                r: 224,
+                g: 108,
+                b: 117,
+            }),
+        ); // Red
+        styles.insert(
+            HighlightGroup::Constant,
+            SyntaxStyle::new(Color::Rgb {
+                r: 209,
+                g: 154,
+                b: 102,
+            }),
+        ); // Orange
+        styles.insert(
+            HighlightGroup::Attribute,
+            SyntaxStyle::new(Color::Rgb {
+                r: 229,
+                g: 192,
+                b: 123,
+            }),
+        ); // Yellow
+        styles.insert(
+            HighlightGroup::Namespace,
+            SyntaxStyle::new(Color::Rgb {
+                r: 97,
+                g: 175,
+                b: 239,
+            }),
+        ); // Blue
+        styles.insert(
+            HighlightGroup::Label,
+            SyntaxStyle::new(Color::Rgb {
+                r: 224,
+                g: 108,
+                b: 117,
+            }),
+        ); // Red
+        styles.insert(
+            HighlightGroup::Property,
+            SyntaxStyle::new(Color::Rgb {
+                r: 224,
+                g: 108,
+                b: 117,
+            }),
+        ); // Red
+        styles.insert(
+            HighlightGroup::Tag,
+            SyntaxStyle::new(Color::Rgb {
+                r: 224,
+                g: 108,
+                b: 117,
+            }),
+        ); // Red (JSX/HTML tags)
+        styles.insert(
+            HighlightGroup::Embedded,
+            SyntaxStyle::new(Color::Rgb {
+                r: 86,
+                g: 182,
+                b: 194,
+            }),
+        ); // Cyan (template string interpolations)
+           // New groups for improved Rust highlighting
+        styles.insert(
+            HighlightGroup::Macro,
+            SyntaxStyle::new(Color::Rgb {
+                r: 86,
+                g: 182,
+                b: 194,
+            }),
+        ); // Cyan
+        styles.insert(
+            HighlightGroup::Method,
+            SyntaxStyle::new(Color::Rgb {
+                r: 97,
+                g: 175,
+                b: 239,
+            }),
+        ); // Blue
+        styles.insert(
+            HighlightGroup::Constructor,
+            SyntaxStyle::new(Color::Rgb {
+                r: 86,
+                g: 182,
+                b: 194,
+            }),
+        ); // Cyan
+        styles.insert(
+            HighlightGroup::Boolean,
+            SyntaxStyle::new(Color::Rgb {
+                r: 209,
+                g: 154,
+                b: 102,
+            }),
+        ); // Orange
 
         Self {
             name: "default".to_string(),
@@ -143,14 +288,12 @@ impl Theme {
 
     /// Get the style for a capture name
     pub fn get_style_for_capture(&self, capture_name: &str) -> Option<SyntaxStyle> {
-        HighlightGroup::from_capture_name(capture_name)
-            .and_then(|group| self.get_style(group))
+        HighlightGroup::from_capture_name(capture_name).and_then(|group| self.get_style(group))
     }
 
     /// Get the color for a capture name (for backwards compatibility)
     pub fn get_color_for_capture(&self, capture_name: &str) -> Option<Color> {
-        HighlightGroup::from_capture_name(capture_name)
-            .and_then(|group| self.get_color(group))
+        HighlightGroup::from_capture_name(capture_name).and_then(|group| self.get_color(group))
     }
 }
 
@@ -179,11 +322,20 @@ impl Theme {
         styles.insert(HighlightGroup::Number, convert(&ui_theme.syntax.number));
         styles.insert(HighlightGroup::Comment, convert(&ui_theme.syntax.comment));
         styles.insert(HighlightGroup::Operator, convert(&ui_theme.syntax.operator));
-        styles.insert(HighlightGroup::Punctuation, convert(&ui_theme.syntax.punctuation));
+        styles.insert(
+            HighlightGroup::Punctuation,
+            convert(&ui_theme.syntax.punctuation),
+        );
         styles.insert(HighlightGroup::Variable, convert(&ui_theme.syntax.variable));
         styles.insert(HighlightGroup::Constant, convert(&ui_theme.syntax.constant));
-        styles.insert(HighlightGroup::Attribute, convert(&ui_theme.syntax.attribute));
-        styles.insert(HighlightGroup::Namespace, convert(&ui_theme.syntax.namespace));
+        styles.insert(
+            HighlightGroup::Attribute,
+            convert(&ui_theme.syntax.attribute),
+        );
+        styles.insert(
+            HighlightGroup::Namespace,
+            convert(&ui_theme.syntax.namespace),
+        );
         styles.insert(HighlightGroup::Label, convert(&ui_theme.syntax.label));
         styles.insert(HighlightGroup::Property, convert(&ui_theme.syntax.property));
         styles.insert(HighlightGroup::Tag, convert(&ui_theme.syntax.tag));
@@ -191,7 +343,10 @@ impl Theme {
         // New groups
         styles.insert(HighlightGroup::Macro, convert(&ui_theme.syntax.macro_));
         styles.insert(HighlightGroup::Method, convert(&ui_theme.syntax.method));
-        styles.insert(HighlightGroup::Constructor, convert(&ui_theme.syntax.constructor));
+        styles.insert(
+            HighlightGroup::Constructor,
+            convert(&ui_theme.syntax.constructor),
+        );
         styles.insert(HighlightGroup::Boolean, convert(&ui_theme.syntax.boolean));
 
         Self {

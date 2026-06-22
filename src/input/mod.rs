@@ -74,11 +74,12 @@ pub struct InputState {
 /// Operators that can be combined with motions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
-    Delete, // d
-    Change, // c
-    Yank,   // y
-    Indent, // >
-    Dedent, // <
+    Delete,     // d
+    Change,     // c
+    Yank,       // y
+    Indent,     // >
+    Dedent,     // <
+    AutoIndent, // =
 }
 
 /// Case transformation operators
@@ -108,6 +109,9 @@ pub enum TextObjectType {
     Brace,        // { } B
     Bracket,      // [ ]
     AngleBracket, // < >
+    Paragraph,    // p
+    Sentence,     // s
+    Tag,          // t
 }
 
 /// A complete text object specification
@@ -160,6 +164,10 @@ pub enum KeyAction {
     PasteAfter(usize),
     /// Paste before cursor
     PasteBefore(usize),
+    /// Paste after cursor and leave cursor after pasted text
+    PasteAfterMove(usize),
+    /// Paste before cursor and leave cursor after pasted text
+    PasteBeforeMove(usize),
     /// Undo
     Undo,
     /// Redo
@@ -178,6 +186,10 @@ pub enum KeyAction {
     SearchWordForward,
     /// Search word under cursor backward (#)
     SearchWordBackward,
+    /// Search forward and select the match (gn)
+    SearchSelectNext(usize),
+    /// Search backward and select the match (gN)
+    SearchSelectPrev(usize),
     /// Enter visual mode
     EnterVisual,
     /// Enter visual line mode
@@ -201,8 +213,20 @@ pub enum KeyAction {
     WindowRight,
     WindowUp,
     WindowDown,
+    WindowEqualize,
+    WindowRotateDownRight,
+    WindowRotateUpLeft,
+    WindowExchangeNext,
     /// Go to definition (gd)
     GotoDefinition,
+    /// Go to declaration (gD)
+    GotoDeclaration,
+    /// Go to implementation (gI)
+    GotoImplementation,
+    /// Open file under cursor (gf)
+    GotoFile,
+    /// Open URL under cursor (gx)
+    OpenUrl,
     /// Show hover documentation (K)
     Hover,
     /// Jump back in jump list (Ctrl+o)
@@ -211,6 +235,16 @@ pub enum KeyAction {
     JumpForward,
     /// Jump to position before last jump ('')
     JumpToPreviousPosition,
+    /// Jump to exact position before last jump (``)
+    JumpToPreviousPositionExact,
+    /// Jump to line of last change ('.)
+    JumpToLastChange,
+    /// Jump to exact position of last change (`.)
+    JumpToLastChangeExact,
+    /// Jump to line of last insert ('^)
+    JumpToLastInsert,
+    /// Jump to exact position of last insert (`^)
+    JumpToLastInsertExact,
     /// Go to older change position (g;)
     ChangeListOlder,
     /// Go to newer change position (g,)
@@ -305,6 +339,33 @@ impl InputState {
         Self::default()
     }
 
+    /// Returns true when the input parser is waiting for more keys to finish a command.
+    pub fn has_pending_sequence(&self) -> bool {
+        self.count.is_some()
+            || self.pending_operator.is_some()
+            || self.partial_key.is_some()
+            || self.pending_text_object.is_some()
+            || self.pending_find_char.is_some()
+            || self.pending_register_select
+            || self.selected_register.is_some()
+            || self.pending_replace
+            || self.pending_window_cmd
+            || self.pending_surround_delete
+            || self.pending_surround_change.is_some()
+            || self.pending_surround_add
+            || self.surround_add_object.is_some()
+            || self.surround_add_motion.is_some()
+            || self.surround_add_line
+            || self.pending_visual_surround
+            || self.pending_comment
+            || self.pending_case_operator.is_some()
+            || self.pending_set_mark
+            || self.pending_goto_mark_line
+            || self.pending_goto_mark_exact
+            || self.pending_record_macro
+            || self.pending_play_macro
+    }
+
     /// Reset input state (preserves last_find_char for ; and , repeats)
     pub fn reset(&mut self) {
         self.count = None;
@@ -378,7 +439,7 @@ impl InputState {
         if self.pending_register_select {
             self.pending_register_select = false;
             if let KeyCode::Char(c) = key.code {
-                // Valid register names: a-z, A-Z, 0-9, ", -, +, *, _, /
+                // Valid register names: a-z, A-Z, 0-9, ", -, +, *, _, /, %, :, #, .
                 if c.is_ascii_alphabetic()
                     || c.is_ascii_digit()
                     || c == '"'
@@ -387,6 +448,10 @@ impl InputState {
                     || c == '*'
                     || c == '_'
                     || c == '/'
+                    || c == '%'
+                    || c == ':'
+                    || c == '#'
+                    || c == '.'
                 {
                     self.selected_register = Some(c);
                     return KeyAction::Pending;
@@ -590,6 +655,16 @@ impl InputState {
                     self.reset();
                     return KeyAction::JumpToPreviousPosition;
                 }
+                if c == '.' {
+                    // '. - jump to line of last change
+                    self.reset();
+                    return KeyAction::JumpToLastChange;
+                }
+                if c == '^' {
+                    // '^ - jump to line of last insert
+                    self.reset();
+                    return KeyAction::JumpToLastInsert;
+                }
                 if c.is_ascii_alphabetic() {
                     self.reset();
                     return KeyAction::GotoMarkLine(c);
@@ -601,6 +676,21 @@ impl InputState {
 
         if self.pending_goto_mark_exact {
             if let KeyCode::Char(c) = key.code {
+                if c == '`' {
+                    // `` - jump to exact position before last jump
+                    self.reset();
+                    return KeyAction::JumpToPreviousPositionExact;
+                }
+                if c == '.' {
+                    // `. - jump to exact position of last change
+                    self.reset();
+                    return KeyAction::JumpToLastChangeExact;
+                }
+                if c == '^' {
+                    // `^ - jump to exact position of last insert
+                    self.reset();
+                    return KeyAction::JumpToLastInsertExact;
+                }
                 if c.is_ascii_alphabetic() {
                     self.reset();
                     return KeyAction::GotoMarkExact(c);
@@ -745,6 +835,18 @@ impl InputState {
                     KeyAction::Pending
                 }
             }
+            // Auto-indent operator
+            (KeyModifiers::NONE, KeyCode::Char('=')) => {
+                if self.pending_operator == Some(Operator::AutoIndent) {
+                    // == - auto-indent line
+                    let final_count = self.combined_count();
+                    self.reset();
+                    KeyAction::OperatorLine(Operator::AutoIndent, final_count)
+                } else {
+                    self.set_operator(Operator::AutoIndent);
+                    KeyAction::Pending
+                }
+            }
 
             // Marks
             (KeyModifiers::NONE, KeyCode::Char('m')) => {
@@ -816,10 +918,20 @@ impl InputState {
             }
             (_, KeyCode::Char('^')) => self.motion_or_operator(Motion::FirstNonBlank, count),
             (_, KeyCode::Char('$')) => self.motion_or_operator(Motion::LineEnd, count),
+            (_, KeyCode::Char('+')) => {
+                self.motion_or_operator(Motion::NextLineFirstNonBlank, count)
+            }
+            (_, KeyCode::Char('-')) => {
+                self.motion_or_operator(Motion::PrevLineFirstNonBlank, count)
+            }
 
             // Paragraph motions
             (_, KeyCode::Char('}')) => self.motion_or_operator(Motion::ParagraphForward, count),
             (_, KeyCode::Char('{')) => self.motion_or_operator(Motion::ParagraphBackward, count),
+
+            // Sentence motions
+            (_, KeyCode::Char(')')) => self.motion_or_operator(Motion::SentenceForward, count),
+            (_, KeyCode::Char('(')) => self.motion_or_operator(Motion::SentenceBackward, count),
 
             // Bracket matching
             (_, KeyCode::Char('%')) => self.motion_or_operator(Motion::MatchingBracket, count),
@@ -1169,6 +1281,76 @@ impl InputState {
                 self.reset();
                 KeyAction::GotoDefinition
             }
+            // gD - go to declaration (LSP)
+            ('g', KeyModifiers::SHIFT, KeyCode::Char('D')) => {
+                self.reset();
+                KeyAction::GotoDeclaration
+            }
+            // gI - go to implementation (LSP)
+            ('g', KeyModifiers::SHIFT, KeyCode::Char('I')) => {
+                self.reset();
+                KeyAction::GotoImplementation
+            }
+            // gf - open file under cursor
+            ('g', KeyModifiers::NONE, KeyCode::Char('f')) => {
+                self.reset();
+                KeyAction::GotoFile
+            }
+            // gx - open URL under cursor
+            ('g', KeyModifiers::NONE, KeyCode::Char('x')) => {
+                self.reset();
+                KeyAction::OpenUrl
+            }
+            // gj - move down one display line
+            ('g', KeyModifiers::NONE, KeyCode::Char('j')) => {
+                let action = self.motion_or_operator(Motion::DisplayLineDown, count);
+                self.reset();
+                action
+            }
+            // gk - move up one display line
+            ('g', KeyModifiers::NONE, KeyCode::Char('k')) => {
+                let action = self.motion_or_operator(Motion::DisplayLineUp, count);
+                self.reset();
+                action
+            }
+            // g0 - move to start of current display line
+            ('g', KeyModifiers::NONE, KeyCode::Char('0')) => {
+                let action = self.motion_or_operator(Motion::DisplayLineStart, count);
+                self.reset();
+                action
+            }
+            // g$ - move to end of current display line
+            ('g', KeyModifiers::NONE, KeyCode::Char('$')) => {
+                let action = self.motion_or_operator(Motion::DisplayLineEnd, count);
+                self.reset();
+                action
+            }
+            // g^ - move to first non-blank of current display line
+            ('g', KeyModifiers::NONE, KeyCode::Char('^')) => {
+                let action = self.motion_or_operator(Motion::DisplayLineFirstNonBlank, count);
+                self.reset();
+                action
+            }
+            // gn - search forward and select match
+            ('g', KeyModifiers::NONE, KeyCode::Char('n')) => {
+                self.reset();
+                KeyAction::SearchSelectNext(count)
+            }
+            // gN - search backward and select match
+            ('g', KeyModifiers::SHIFT, KeyCode::Char('N')) => {
+                self.reset();
+                KeyAction::SearchSelectPrev(count)
+            }
+            // gp - paste after and leave cursor after pasted text
+            ('g', KeyModifiers::NONE, KeyCode::Char('p')) => {
+                self.reset();
+                KeyAction::PasteAfterMove(count)
+            }
+            // gP - paste before and leave cursor after pasted text
+            ('g', KeyModifiers::SHIFT, KeyCode::Char('P')) => {
+                self.reset();
+                KeyAction::PasteBeforeMove(count)
+            }
             // gr - find references (LSP)
             ('g', KeyModifiers::NONE, KeyCode::Char('r')) => {
                 self.reset();
@@ -1314,6 +1496,9 @@ impl InputState {
             (KeyModifiers::SHIFT, KeyCode::Char('B')) => Some(TextObjectType::Brace),
             (_, KeyCode::Char('[')) | (_, KeyCode::Char(']')) => Some(TextObjectType::Bracket),
             (_, KeyCode::Char('<')) | (_, KeyCode::Char('>')) => Some(TextObjectType::AngleBracket),
+            (KeyModifiers::NONE, KeyCode::Char('p')) => Some(TextObjectType::Paragraph),
+            (KeyModifiers::NONE, KeyCode::Char('s')) => Some(TextObjectType::Sentence),
+            (KeyModifiers::NONE, KeyCode::Char('t')) => Some(TextObjectType::Tag),
             _ => None,
         };
 
@@ -1371,6 +1556,9 @@ impl InputState {
             KeyCode::Char('<') | KeyCode::Char('>') | KeyCode::Char('a') => {
                 Some(TextObjectType::AngleBracket)
             }
+            KeyCode::Char('p') => Some(TextObjectType::Paragraph),
+            KeyCode::Char('s') => Some(TextObjectType::Sentence),
+            KeyCode::Char('t') => Some(TextObjectType::Tag),
             _ => None,
         }
     }
@@ -1389,8 +1577,12 @@ impl InputState {
             (KeyModifiers::NONE, KeyCode::Char('0')) => Motion::LineStart,
             (_, KeyCode::Char('^')) => Motion::FirstNonBlank,
             (_, KeyCode::Char('$')) => Motion::LineEnd,
+            (_, KeyCode::Char('+')) => Motion::NextLineFirstNonBlank,
+            (_, KeyCode::Char('-')) => Motion::PrevLineFirstNonBlank,
             (_, KeyCode::Char('}')) => Motion::ParagraphForward,
             (_, KeyCode::Char('{')) => Motion::ParagraphBackward,
+            (_, KeyCode::Char(')')) => Motion::SentenceForward,
+            (_, KeyCode::Char('(')) => Motion::SentenceBackward,
             (_, KeyCode::Char('%')) => Motion::MatchingBracket,
             (KeyModifiers::SHIFT, KeyCode::Char('G')) => {
                 if self.count.is_some() {
@@ -1455,6 +1647,13 @@ impl InputState {
             // Close
             (KeyModifiers::NONE, KeyCode::Char('q')) => KeyAction::WindowClose,
             (KeyModifiers::NONE, KeyCode::Char('o')) => KeyAction::WindowCloseOthers,
+            // Equalize
+            (KeyModifiers::NONE, KeyCode::Char('=')) => KeyAction::WindowEqualize,
+            // Rotate
+            (KeyModifiers::NONE, KeyCode::Char('r')) => KeyAction::WindowRotateDownRight,
+            (KeyModifiers::SHIFT, KeyCode::Char('R')) => KeyAction::WindowRotateUpLeft,
+            // Exchange
+            (KeyModifiers::NONE, KeyCode::Char('x')) => KeyAction::WindowExchangeNext,
             // Escape cancels
             (_, KeyCode::Esc) => KeyAction::Pending,
             _ => KeyAction::Unknown,
@@ -1517,6 +1716,14 @@ impl InputState {
                 self.reset();
                 KeyAction::ToggleCommentMotion(Motion::FirstNonBlank, count)
             }
+            (_, KeyCode::Char('+')) => {
+                self.reset();
+                KeyAction::ToggleCommentMotion(Motion::NextLineFirstNonBlank, count)
+            }
+            (_, KeyCode::Char('-')) => {
+                self.reset();
+                KeyAction::ToggleCommentMotion(Motion::PrevLineFirstNonBlank, count)
+            }
             // Paragraph motions
             (_, KeyCode::Char('}')) => {
                 self.reset();
@@ -1525,6 +1732,15 @@ impl InputState {
             (_, KeyCode::Char('{')) => {
                 self.reset();
                 KeyAction::ToggleCommentMotion(Motion::ParagraphBackward, count)
+            }
+            // Sentence motions
+            (_, KeyCode::Char(')')) => {
+                self.reset();
+                KeyAction::ToggleCommentMotion(Motion::SentenceForward, count)
+            }
+            (_, KeyCode::Char('(')) => {
+                self.reset();
+                KeyAction::ToggleCommentMotion(Motion::SentenceBackward, count)
             }
             // File motions
             (KeyModifiers::SHIFT, KeyCode::Char('G')) => {
@@ -1634,6 +1850,14 @@ impl InputState {
                 self.reset();
                 KeyAction::CaseMotion(case_op, Motion::FirstNonBlank, count)
             }
+            (_, KeyCode::Char('+')) => {
+                self.reset();
+                KeyAction::CaseMotion(case_op, Motion::NextLineFirstNonBlank, count)
+            }
+            (_, KeyCode::Char('-')) => {
+                self.reset();
+                KeyAction::CaseMotion(case_op, Motion::PrevLineFirstNonBlank, count)
+            }
             // Paragraph motions
             (_, KeyCode::Char('}')) => {
                 self.reset();
@@ -1642,6 +1866,15 @@ impl InputState {
             (_, KeyCode::Char('{')) => {
                 self.reset();
                 KeyAction::CaseMotion(case_op, Motion::ParagraphBackward, count)
+            }
+            // Sentence motions
+            (_, KeyCode::Char(')')) => {
+                self.reset();
+                KeyAction::CaseMotion(case_op, Motion::SentenceForward, count)
+            }
+            (_, KeyCode::Char('(')) => {
+                self.reset();
+                KeyAction::CaseMotion(case_op, Motion::SentenceBackward, count)
             }
             // File motions
             (KeyModifiers::SHIFT, KeyCode::Char('G')) => {
@@ -1808,6 +2041,12 @@ mod tests {
         assert_motion(&[key('k')], Motion::Up, 1);
         assert_motion(&[key('l')], Motion::Right, 1);
         assert_motion(&[key('3'), key('j')], Motion::Down, 3);
+        assert_motion(&[key('g'), key('j')], Motion::DisplayLineDown, 1);
+        assert_motion(&[key('g'), key('k')], Motion::DisplayLineUp, 1);
+        assert_motion(&[key('3'), key('g'), key('j')], Motion::DisplayLineDown, 3);
+        assert_motion(&[key('g'), key('0')], Motion::DisplayLineStart, 1);
+        assert_motion(&[key('g'), key('$')], Motion::DisplayLineEnd, 1);
+        assert_motion(&[key('g'), key('^')], Motion::DisplayLineFirstNonBlank, 1);
 
         assert_motion(&[key('w')], Motion::WordForward, 1);
         assert_motion(&[shift('W')], Motion::BigWordForward, 1);
@@ -1821,8 +2060,15 @@ mod tests {
         assert_motion(&[key('0')], Motion::LineStart, 1);
         assert_motion(&[key('^')], Motion::FirstNonBlank, 1);
         assert_motion(&[key('$')], Motion::LineEnd, 1);
+        assert_motion(&[key('+')], Motion::NextLineFirstNonBlank, 1);
+        assert_motion(&[key('-')], Motion::PrevLineFirstNonBlank, 1);
+        assert_motion(&[key('3'), key('+')], Motion::NextLineFirstNonBlank, 3);
+        assert_motion(&[key('3'), key('-')], Motion::PrevLineFirstNonBlank, 3);
         assert_motion(&[key('{')], Motion::ParagraphBackward, 1);
         assert_motion(&[key('}')], Motion::ParagraphForward, 1);
+        assert_motion(&[key('(')], Motion::SentenceBackward, 1);
+        assert_motion(&[key(')')], Motion::SentenceForward, 1);
+        assert_motion(&[key('2'), key(')')], Motion::SentenceForward, 2);
 
         assert_motion(&[key('g'), key('g')], Motion::FileStart, 1);
         assert_motion(&[shift('G')], Motion::FileEnd, 1);
@@ -1911,6 +2157,9 @@ mod tests {
         assert_operator_motion(&[key('>'), key('j')], Operator::Indent, Motion::Down, 1);
         assert_operator_line(&[key('<'), key('<')], Operator::Dedent, 1);
         assert_operator_motion(&[key('<'), key('j')], Operator::Dedent, Motion::Down, 1);
+        assert_operator_line(&[key('='), key('=')], Operator::AutoIndent, 1);
+        assert_operator_motion(&[key('='), key('j')], Operator::AutoIndent, Motion::Down, 1);
+        assert_operator_line(&[key('2'), key('='), key('=')], Operator::AutoIndent, 2);
 
         match run(&[key('x')]) {
             KeyAction::DeleteChar(1) => {}
@@ -1932,6 +2181,14 @@ mod tests {
         match run(&[shift('P')]) {
             KeyAction::PasteBefore(1) => {}
             other => panic!("expected PasteBefore, got {:?}", other),
+        }
+        match run(&[key('g'), key('p')]) {
+            KeyAction::PasteAfterMove(1) => {}
+            other => panic!("expected PasteAfterMove, got {:?}", other),
+        }
+        match run(&[key('g'), shift('P')]) {
+            KeyAction::PasteBeforeMove(1) => {}
+            other => panic!("expected PasteBeforeMove, got {:?}", other),
         }
         match run(&[key('r'), key('x')]) {
             KeyAction::ReplaceChar('x', 1) => {}
@@ -2031,6 +2288,14 @@ mod tests {
             KeyAction::SearchWordBackward => {}
             other => panic!("expected SearchWordBackward, got {:?}", other),
         }
+        match run(&[key('g'), key('n')]) {
+            KeyAction::SearchSelectNext(1) => {}
+            other => panic!("expected SearchSelectNext, got {:?}", other),
+        }
+        match run(&[key('g'), shift('N')]) {
+            KeyAction::SearchSelectPrev(1) => {}
+            other => panic!("expected SearchSelectPrev, got {:?}", other),
+        }
 
         match run(&[key('v')]) {
             KeyAction::EnterVisual => {}
@@ -2052,6 +2317,19 @@ mod tests {
         match run(&[key('g'), key('d')]) {
             KeyAction::GotoDefinition => {}
             other => panic!("expected GotoDefinition, got {:?}", other),
+        }
+        assert_eq!(
+            format!("{:?}", run(&[key('g'), shift('D')])),
+            "GotoDeclaration"
+        );
+        assert_eq!(
+            format!("{:?}", run(&[key('g'), shift('I')])),
+            "GotoImplementation"
+        );
+        assert_eq!(format!("{:?}", run(&[key('g'), key('x')])), "OpenUrl");
+        match run(&[key('g'), key('f')]) {
+            KeyAction::GotoFile => {}
+            other => panic!("expected GotoFile, got {:?}", other),
         }
         match run(&[key('g'), key('r')]) {
             KeyAction::FindReferences => {}
@@ -2141,6 +2419,26 @@ mod tests {
             KeyAction::JumpToPreviousPosition => {}
             other => panic!("expected JumpToPreviousPosition, got {:?}", other),
         }
+        match run(&[key('`'), key('`')]) {
+            KeyAction::JumpToPreviousPositionExact => {}
+            other => panic!("expected JumpToPreviousPositionExact, got {:?}", other),
+        }
+        match run(&[key('\''), key('.')]) {
+            KeyAction::JumpToLastChange => {}
+            other => panic!("expected JumpToLastChange, got {:?}", other),
+        }
+        match run(&[key('`'), key('.')]) {
+            KeyAction::JumpToLastChangeExact => {}
+            other => panic!("expected JumpToLastChangeExact, got {:?}", other),
+        }
+        match run(&[key('\''), key('^')]) {
+            KeyAction::JumpToLastInsert => {}
+            other => panic!("expected JumpToLastInsert, got {:?}", other),
+        }
+        match run(&[key('`'), key('^')]) {
+            KeyAction::JumpToLastInsertExact => {}
+            other => panic!("expected JumpToLastInsertExact, got {:?}", other),
+        }
 
         match run(&[key('q'), key('a')]) {
             KeyAction::StartRecordMacro('a') => {}
@@ -2170,6 +2468,22 @@ mod tests {
         match run(&[ctrl('w'), key('o')]) {
             KeyAction::WindowCloseOthers => {}
             other => panic!("expected WindowCloseOthers, got {:?}", other),
+        }
+        match run(&[ctrl('w'), key('=')]) {
+            KeyAction::WindowEqualize => {}
+            other => panic!("expected WindowEqualize, got {:?}", other),
+        }
+        match run(&[ctrl('w'), key('r')]) {
+            KeyAction::WindowRotateDownRight => {}
+            other => panic!("expected WindowRotateDownRight, got {:?}", other),
+        }
+        match run(&[ctrl('w'), shift('R')]) {
+            KeyAction::WindowRotateUpLeft => {}
+            other => panic!("expected WindowRotateUpLeft, got {:?}", other),
+        }
+        match run(&[ctrl('w'), key('x')]) {
+            KeyAction::WindowExchangeNext => {}
+            other => panic!("expected WindowExchangeNext, got {:?}", other),
         }
         match run(&[ctrl('w'), key('w')]) {
             KeyAction::WindowNext => {}

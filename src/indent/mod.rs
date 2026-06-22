@@ -34,19 +34,17 @@ const INDENT_NODES: &[&str] = &[
     "switch_case",
     "switch_default",
     "parenthesized_expression",
-
     // === CSS/SCSS ===
-    "block",              // selector { ... }
-    "declaration_list",   // same as block in some grammars
+    "block",            // selector { ... }
+    "declaration_list", // same as block in some grammars
     "media_statement",
     "keyframe_block_list",
     "feature_query",
-
     // === JSON ===
     // "object" and "array" already included above
 
     // === TOML ===
-    "inline_table",       // { key = value }
+    "inline_table", // { key = value }
     // "array" already included above
 
     // === HTML ===
@@ -65,12 +63,7 @@ const INDENT_NODES: &[&str] = &[
 ///
 /// # Returns
 /// The number of spaces to indent the new line
-pub fn calculate_indent(
-    tree: &Tree,
-    source: &str,
-    cursor_byte: usize,
-    tab_width: usize,
-) -> usize {
+pub fn calculate_indent(tree: &Tree, source: &str, cursor_byte: usize, tab_width: usize) -> usize {
     // Get the base indent from the current line
     let line_indent = get_line_indent_at_byte(source, cursor_byte);
     let base_level = line_indent / tab_width;
@@ -147,9 +140,18 @@ pub fn calculate_closing_bracket_indent(
     // Walk up to find the matching container
     let mut current = Some(node);
     let container_kinds = match bracket {
-        '}' => vec!["statement_block", "class_body", "object", "object_pattern",
-                   "switch_body", "enum_body", "interface_body", "object_type",
-                   "named_imports", "export_clause"],
+        '}' => vec![
+            "statement_block",
+            "class_body",
+            "object",
+            "object_pattern",
+            "switch_body",
+            "enum_body",
+            "interface_body",
+            "object_type",
+            "named_imports",
+            "export_clause",
+        ],
         ']' => vec!["array", "array_pattern"],
         ')' => vec!["arguments", "formal_parameters", "parenthesized_expression"],
         _ => return None,
@@ -202,7 +204,9 @@ pub fn should_dedent_closing_bracket(
     let current_indent = line_before.len();
 
     // Get the expected indent for this closing bracket
-    if let Some(expected_indent) = calculate_closing_bracket_indent(tree, source, cursor_byte, bracket) {
+    if let Some(expected_indent) =
+        calculate_closing_bracket_indent(tree, source, cursor_byte, bracket)
+    {
         // Dedent if current indent is more than expected
         return current_indent > expected_indent;
     }
@@ -229,7 +233,9 @@ pub fn get_dedent_amount(
 
     let current_indent = line_before.len();
 
-    if let Some(expected_indent) = calculate_closing_bracket_indent(tree, source, cursor_byte, bracket) {
+    if let Some(expected_indent) =
+        calculate_closing_bracket_indent(tree, source, cursor_byte, bracket)
+    {
         if current_indent > expected_indent {
             return current_indent - expected_indent;
         }
@@ -290,10 +296,7 @@ fn get_line_before_cursor(source: &str, cursor_byte: usize) -> &str {
 /// Get the indentation (in spaces) at the start of the line containing the given byte
 fn get_line_indent_at_byte(source: &str, byte: usize) -> usize {
     // Find the start of the line
-    let line_start = source[..byte]
-        .rfind('\n')
-        .map(|pos| pos + 1)
-        .unwrap_or(0);
+    let line_start = source[..byte].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
 
     // Count leading whitespace
     let line = &source[line_start..];
@@ -327,13 +330,17 @@ mod tests {
 
     fn parse_js(source: &str) -> Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_javascript::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_javascript::LANGUAGE.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 
     fn parse_ts(source: &str) -> Tree {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -381,7 +388,13 @@ mod tests {
     fn test_closing_bracket_dedent() {
         let source = "function foo() {\n    return bar;\n    ";
         let tree = parse_js(source);
-        assert!(should_dedent_closing_bracket(&tree, source, source.len(), '}', 4));
+        assert!(should_dedent_closing_bracket(
+            &tree,
+            source,
+            source.len(),
+            '}',
+            4
+        ));
     }
 
     #[test]

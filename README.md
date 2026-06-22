@@ -176,19 +176,19 @@ Nevi aims for full vim/neovim keybind compatibility. Most common keybindings are
 > **Full reference:** See [KEYBINDINGS.md](KEYBINDINGS.md) for the complete keybind documentation with examples and tips.
 
 ### Movement
-`h/j/k/l`, `w/b/e/W/B/E`, `0/^/$`, `gg/G`, `{/}`, `f/F/t/T`, `;/,`, `%`, `H/M/L`
+`h/j/k/l`, `w/b/e/W/B/E`, `0/^/$`, `+/-`, `gg/G`, `{/}`, `(`/`)`, `f/F/t/T`, `;/,`, `%`, `H/M/L`, `gj/gk/g0/g$/g^`
 
 ### Editing
-`d/c/y` + motions, `dd/cc/yy`, `p/P`, `x/X`, `r`, `J`, `.`, `u/Ctrl+r`
+`d/c/y` + motions, `dd/cc/yy`, `p/P/gp/gP`, `x/X`, `r`, `J/gJ`, `==/={motion}`, `.`, `u/Ctrl+r`
 
 ### Text Objects
-`iw/aw`, `iW/aW`, `i"/a"`, `i'/a'`, `i(/a(`, `i{/a{`, `i[/a[`, `i</a<`
+`iw/aw`, `iW/aW`, `i"/a"`, `i'/a'`, `i(/a(`, `i{/a{`, `i[/a[`, `i</a<`, `ip/ap`, `is/as`, `it/at`
 
 ### Search
-`/`, `?`, `n/N`, `*/#`
+`/`, `?`, `n/N`, `*/#`, `gn/gN`
 
 ### LSP
-`gd` (definition), `gr` (references), `K` (hover), `gl` (diagnostic), `]d/[d` (next/prev diagnostic)
+`gd` (definition), `gD` (declaration), `gI` (implementation), `gf` (file under cursor), `gx` (URL under cursor), `gr` (references), `K` (hover), `gl` (diagnostic), `]d/[d` (next/prev diagnostic)
 
 ### Surround
 `ds{char}` (delete), `cs{old}{new}` (change), `ys{motion}{char}` (add)
@@ -197,6 +197,8 @@ Nevi aims for full vim/neovim keybind compatibility. Most common keybindings are
 `gcc` (line), `gc{motion}` (motion)
 
 ### Leader (`<Space>`)
+Press `<Space>` by itself to show available leader continuations. Set `[keymap] show_leader_popup = false` to disable that popup.
+
 | Key | Action |
 |-----|--------|
 | `ff` | Find files |
@@ -220,10 +222,10 @@ Nevi aims for full vim/neovim keybind compatibility. Most common keybindings are
 | `1-4` | Jump to harpoon slot |
 
 ### Window Management
-`Ctrl+w v` (vsplit), `Ctrl+w s` (hsplit), `Ctrl+w q` (close), `Ctrl+w h/j/k/l` or `Ctrl+h/j/k/l` (navigate), `Ctrl+w w/W` (next/previous)
+`Ctrl+w v` (vsplit), `Ctrl+w s` (hsplit), `Ctrl+w q` (close), `Ctrl+w h/j/k/l` or `Ctrl+h/j/k/l` (navigate), `Ctrl+w w/W` (next/previous), `Ctrl+w =` (equalize), `Ctrl+w r/R` (rotate), `Ctrl+w x` (exchange)
 
 ### And More
-Visual mode (`v/V/Ctrl+v`), macros (`q{a-z}/@{a-z}`), marks (`m{a-z}/'`), registers (`"{a-z}/"+`), replace mode (`R`)
+Visual mode (`v/V/Ctrl+v`), macros (`q{a-z}/@{a-z}`), marks (`m{a-z}/'`), read-only registers (`"%`, `":`, `"#`, `".`), insert helpers (`Ctrl+t/Ctrl+d/Ctrl+a/Ctrl+r/Ctrl+o`), replace mode (`R`)
 
 > **Missing a keybind?** Check [KEYBINDINGS.md](KEYBINDINGS.md) for the full list of what's implemented. If you don't see the one you want, take a look at the [keybind roadmap](KEYBINDS_ROADMAP.md) to see if it's already planned — and if it's not, [open an issue](https://github.com/anthonyamaro15/nevi/issues) to request it (PRs welcome too).
 

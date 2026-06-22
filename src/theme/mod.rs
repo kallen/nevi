@@ -69,10 +69,10 @@ pub struct SyntaxColors {
     pub tag: StyleDef,
     pub embedded: StyleDef, // For embedded expressions like ${} in template strings
     // New groups for improved Rust highlighting
-    pub macro_: StyleDef,       // format!, println!
-    pub method: StyleDef,       // .clone(), .ok()
-    pub constructor: StyleDef,  // Some, None, Ok, Err
-    pub boolean: StyleDef,      // true, false
+    pub macro_: StyleDef,      // format!, println!
+    pub method: StyleDef,      // .clone(), .ok()
+    pub constructor: StyleDef, // Some, None, Ok, Err
+    pub boolean: StyleDef,     // true, false
 }
 
 /// UI element colors
@@ -160,17 +160,61 @@ impl Theme {
     /// Create the default One Dark theme
     pub fn onedark() -> Self {
         // One Dark palette
-        let red = Color::Rgb { r: 224, g: 108, b: 117 };
-        let green = Color::Rgb { r: 152, g: 195, b: 121 };
-        let yellow = Color::Rgb { r: 229, g: 192, b: 123 };
-        let blue = Color::Rgb { r: 97, g: 175, b: 239 };
-        let purple = Color::Rgb { r: 198, g: 120, b: 221 };
-        let cyan = Color::Rgb { r: 86, g: 182, b: 194 };
-        let orange = Color::Rgb { r: 209, g: 154, b: 102 };
-        let gray = Color::Rgb { r: 92, g: 99, b: 112 };
-        let fg = Color::Rgb { r: 171, g: 178, b: 191 };
-        let bg = Color::Rgb { r: 40, g: 44, b: 52 };
-        let bg_dark = Color::Rgb { r: 33, g: 37, b: 43 };
+        let red = Color::Rgb {
+            r: 224,
+            g: 108,
+            b: 117,
+        };
+        let green = Color::Rgb {
+            r: 152,
+            g: 195,
+            b: 121,
+        };
+        let yellow = Color::Rgb {
+            r: 229,
+            g: 192,
+            b: 123,
+        };
+        let blue = Color::Rgb {
+            r: 97,
+            g: 175,
+            b: 239,
+        };
+        let purple = Color::Rgb {
+            r: 198,
+            g: 120,
+            b: 221,
+        };
+        let cyan = Color::Rgb {
+            r: 86,
+            g: 182,
+            b: 194,
+        };
+        let orange = Color::Rgb {
+            r: 209,
+            g: 154,
+            b: 102,
+        };
+        let gray = Color::Rgb {
+            r: 92,
+            g: 99,
+            b: 112,
+        };
+        let fg = Color::Rgb {
+            r: 171,
+            g: 178,
+            b: 191,
+        };
+        let bg = Color::Rgb {
+            r: 40,
+            g: 44,
+            b: 52,
+        };
+        let bg_dark = Color::Rgb {
+            r: 33,
+            g: 37,
+            b: 43,
+        };
 
         Self {
             name: "onedark".to_string(),
@@ -200,8 +244,16 @@ impl Theme {
             ui: UiColors {
                 background: bg,
                 foreground: fg,
-                cursor_line: Color::Rgb { r: 44, g: 49, b: 60 },
-                selection: Color::Rgb { r: 62, g: 68, b: 81 },
+                cursor_line: Color::Rgb {
+                    r: 44,
+                    g: 49,
+                    b: 60,
+                },
+                selection: Color::Rgb {
+                    r: 62,
+                    g: 68,
+                    b: 81,
+                },
                 line_number: gray,
                 line_number_active: fg,
 
@@ -214,38 +266,106 @@ impl Theme {
                 statusline_mode_replace: red,
 
                 popup_bg: bg_dark,
-                popup_border: Color::Rgb { r: 55, g: 55, b: 65 },
-                popup_selection: Color::Rgb { r: 55, g: 77, b: 95 },
+                popup_border: Color::Rgb {
+                    r: 55,
+                    g: 55,
+                    b: 65,
+                },
+                popup_selection: Color::Rgb {
+                    r: 55,
+                    g: 77,
+                    b: 95,
+                },
 
-                completion_bg: Color::Rgb { r: 30, g: 30, b: 36 },
-                completion_border: Color::Rgb { r: 55, g: 55, b: 65 },
-                completion_selected: Color::Rgb { r: 55, g: 77, b: 95 },
+                completion_bg: Color::Rgb {
+                    r: 30,
+                    g: 30,
+                    b: 36,
+                },
+                completion_border: Color::Rgb {
+                    r: 55,
+                    g: 55,
+                    b: 65,
+                },
+                completion_selected: Color::Rgb {
+                    r: 55,
+                    g: 77,
+                    b: 95,
+                },
                 completion_match: yellow,
-                completion_detail: Color::Rgb { r: 100, g: 100, b: 115 },
+                completion_detail: Color::Rgb {
+                    r: 100,
+                    g: 100,
+                    b: 115,
+                },
 
-                finder_bg: Color::Rgb { r: 25, g: 25, b: 30 },
-                finder_border: Color::Rgb { r: 100, g: 100, b: 100 },
-                finder_selected: Color::Rgb { r: 60, g: 60, b: 100 },
+                finder_bg: Color::Rgb {
+                    r: 25,
+                    g: 25,
+                    b: 30,
+                },
+                finder_border: Color::Rgb {
+                    r: 100,
+                    g: 100,
+                    b: 100,
+                },
+                finder_selected: Color::Rgb {
+                    r: 60,
+                    g: 60,
+                    b: 100,
+                },
                 finder_match: yellow,
                 finder_prompt: blue,
 
-                search_match_bg: Color::Rgb { r: 180, g: 160, b: 60 },
+                search_match_bg: Color::Rgb {
+                    r: 180,
+                    g: 160,
+                    b: 60,
+                },
                 search_match_fg: Color::Rgb { r: 0, g: 0, b: 0 },
 
-                visual_bg: Color::Rgb { r: 62, g: 68, b: 81 },
+                visual_bg: Color::Rgb {
+                    r: 62,
+                    g: 68,
+                    b: 81,
+                },
 
                 explorer_bg: bg_dark,
-                explorer_border: Color::Rgb { r: 55, g: 55, b: 65 },
-                explorer_selected: Color::Rgb { r: 55, g: 77, b: 95 },
+                explorer_border: Color::Rgb {
+                    r: 55,
+                    g: 55,
+                    b: 65,
+                },
+                explorer_selected: Color::Rgb {
+                    r: 55,
+                    g: 77,
+                    b: 95,
+                },
                 explorer_directory: blue,
 
                 harpoon_bg: bg_dark,
-                harpoon_border: Color::Rgb { r: 55, g: 55, b: 65 },
-                harpoon_selected: Color::Rgb { r: 55, g: 77, b: 95 },
+                harpoon_border: Color::Rgb {
+                    r: 55,
+                    g: 55,
+                    b: 65,
+                },
+                harpoon_selected: Color::Rgb {
+                    r: 55,
+                    g: 77,
+                    b: 95,
+                },
             },
             diagnostic: DiagnosticColors {
-                error: Color::Rgb { r: 255, g: 100, b: 100 },
-                warning: Color::Rgb { r: 255, g: 200, b: 100 },
+                error: Color::Rgb {
+                    r: 255,
+                    g: 100,
+                    b: 100,
+                },
+                warning: Color::Rgb {
+                    r: 255,
+                    g: 200,
+                    b: 100,
+                },
                 info: blue,
                 hint: cyan,
             },
@@ -395,7 +515,9 @@ impl ThemeManager {
         }
 
         // Add user themes (sorted)
-        let mut user_themes: Vec<&str> = self.available.keys()
+        let mut user_themes: Vec<&str> = self
+            .available
+            .keys()
             .filter(|name| !bundled_names.contains(&name.as_str()))
             .map(|s| s.as_str())
             .collect();

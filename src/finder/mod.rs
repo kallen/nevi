@@ -1,12 +1,12 @@
 mod file_picker;
 mod grep;
-mod matcher;
 mod keybinds;
+mod matcher;
 
 pub use file_picker::FilePicker;
 pub use grep::GrepSearcher;
-pub use matcher::FuzzyMatcher;
 pub use keybinds::keymap_finder_items;
+pub use matcher::FuzzyMatcher;
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -761,12 +761,8 @@ impl FuzzyFinder {
                                 (0, item.display.as_str())
                             };
                             matcher.match_score(&query, match_text).map(|score| {
-                                let indices = offset_match_indices(
-                                    matcher,
-                                    &query,
-                                    match_text,
-                                    match_start,
-                                );
+                                let indices =
+                                    offset_match_indices(matcher, &query, match_text, match_start);
                                 (idx, score, indices)
                             })
                         })
@@ -1178,14 +1174,23 @@ mod tests {
     fn open_keymaps_sets_mode_and_loads_items() {
         let mut finder = FuzzyFinder::new();
         finder.open_keymaps(vec![
-            FinderItem::new("n       h                  Move cursor left".to_string(), PathBuf::new()),
-            FinderItem::new("leader  <leader>ff         Find files".to_string(), PathBuf::new()),
+            FinderItem::new(
+                "n       h                  Move cursor left".to_string(),
+                PathBuf::new(),
+            ),
+            FinderItem::new(
+                "leader  <leader>ff         Find files".to_string(),
+                PathBuf::new(),
+            ),
         ]);
 
         assert_eq!(finder.mode, FinderMode::Keymaps);
         assert_eq!(finder.items.len(), 2);
         assert!(finder.populated);
-        assert!(!finder.mode_supports_preview(), "keymaps mode has no preview pane");
+        assert!(
+            !finder.mode_supports_preview(),
+            "keymaps mode has no preview pane"
+        );
     }
 
     #[test]
@@ -1193,7 +1198,11 @@ mod tests {
         let items = crate::finder::keymap_finder_items(&crate::config::KeymapSettings::default());
         assert!(!items.is_empty(), "expected some implemented keybindings");
         for item in &items {
-            assert_eq!(item.path, std::path::PathBuf::new(), "keymap items must have no path");
+            assert_eq!(
+                item.path,
+                std::path::PathBuf::new(),
+                "keymap items must have no path"
+            );
             assert!(item.buffer_idx.is_none());
             assert!(item.terminal_session_position.is_none());
             assert!(item.git_status.is_none());
@@ -1244,13 +1253,11 @@ mod tests {
     #[test]
     fn git_changes_finder_highlights_path_matches_in_display_text() {
         let mut finder = FuzzyFinder::new();
-        finder.open_git_changes(vec![
-            FinderItem::new(
-                "M src/lib/types.ts".to_string(),
-                PathBuf::from("/repo/src/lib/types.ts"),
-            )
-            .with_git_status(crate::git::GitFileStatus::Modified),
-        ]);
+        finder.open_git_changes(vec![FinderItem::new(
+            "M src/lib/types.ts".to_string(),
+            PathBuf::from("/repo/src/lib/types.ts"),
+        )
+        .with_git_status(crate::git::GitFileStatus::Modified)]);
 
         for ch in "type".chars() {
             finder.insert_char(ch);

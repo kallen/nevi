@@ -65,10 +65,13 @@ impl FrecencyDb {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let entry = self.entries.entry(label.to_string()).or_insert(FrecencyEntry {
-            count: 0,
-            last_used: now,
-        });
+        let entry = self
+            .entries
+            .entry(label.to_string())
+            .or_insert(FrecencyEntry {
+                count: 0,
+                last_used: now,
+            });
         entry.count += 1;
         entry.last_used = now;
     }
@@ -122,9 +125,8 @@ impl FrecencyDb {
             .unwrap_or(0);
 
         let max_age_secs = max_age_days * 24 * 60 * 60;
-        self.entries.retain(|_, entry| {
-            now.saturating_sub(entry.last_used) < max_age_secs
-        });
+        self.entries
+            .retain(|_, entry| now.saturating_sub(entry.last_used) < max_age_secs);
     }
 }
 

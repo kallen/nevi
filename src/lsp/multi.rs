@@ -617,6 +617,46 @@ impl MultiLspManager {
         Ok(())
     }
 
+    /// Request go-to-declaration for a file
+    pub fn goto_declaration(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        character: u32,
+    ) -> anyhow::Result<()> {
+        let lang = self
+            .language_for_path(path)
+            .ok_or_else(|| anyhow::anyhow!("Unknown language for {:?}", path))?;
+
+        if let Some(instance) = self.get_instance_mut(lang) {
+            if instance.ready {
+                instance.manager.goto_declaration(path, line, character)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Request go-to-implementation for a file
+    pub fn goto_implementation(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        character: u32,
+    ) -> anyhow::Result<()> {
+        let lang = self
+            .language_for_path(path)
+            .ok_or_else(|| anyhow::anyhow!("Unknown language for {:?}", path))?;
+
+        if let Some(instance) = self.get_instance_mut(lang) {
+            if instance.ready {
+                instance
+                    .manager
+                    .goto_implementation(path, line, character)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Request references for a symbol
     pub fn references(&mut self, path: &PathBuf, line: u32, character: u32) -> anyhow::Result<()> {
         let lang = self

@@ -60,7 +60,9 @@ impl Marks {
 
     /// Get a local mark for a specific buffer
     pub fn get_local(&self, buffer_key: &str, name: char) -> Option<&Mark> {
-        self.local.get(buffer_key).and_then(|marks| marks.get(&name))
+        self.local
+            .get(buffer_key)
+            .and_then(|marks| marks.get(&name))
     }
 
     /// Get a global mark
@@ -78,7 +80,14 @@ impl Marks {
     }
 
     /// Set a mark by name (determines local vs global based on case)
-    pub fn set(&mut self, buffer_key: &str, path: Option<PathBuf>, name: char, line: usize, col: usize) {
+    pub fn set(
+        &mut self,
+        buffer_key: &str,
+        path: Option<PathBuf>,
+        name: char,
+        line: usize,
+        col: usize,
+    ) {
         if name.is_lowercase() {
             self.set_local(buffer_key, name, line, col);
         } else if let Some(p) = path {
@@ -104,7 +113,8 @@ impl Marks {
 
     /// Get all global marks (sorted by name)
     pub fn get_global_marks(&self) -> Vec<(char, &Mark)> {
-        let mut marks: Vec<(char, &Mark)> = self.global.iter().map(|(c, mark)| (*c, mark)).collect();
+        let mut marks: Vec<(char, &Mark)> =
+            self.global.iter().map(|(c, mark)| (*c, mark)).collect();
         marks.sort_by_key(|(c, _)| *c);
         marks
     }

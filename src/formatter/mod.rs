@@ -19,7 +19,10 @@ pub enum FormatterError {
     /// Formatter command not found
     CommandNotFound(String),
     /// Formatter process failed with non-zero exit code
-    CommandFailed { stderr: String, exit_code: Option<i32> },
+    CommandFailed {
+        stderr: String,
+        exit_code: Option<i32>,
+    },
     /// Formatter output was not valid UTF-8
     InvalidUtf8,
     /// Formatter timed out
@@ -42,7 +45,9 @@ impl std::fmt::Display for FormatterError {
             }
             FormatterError::InvalidUtf8 => write!(f, "Formatter output was not valid UTF-8"),
             FormatterError::Timeout => write!(f, "Formatter timed out"),
-            FormatterError::StdinWriteFailed(e) => write!(f, "Failed to send content to formatter: {}", e),
+            FormatterError::StdinWriteFailed(e) => {
+                write!(f, "Failed to send content to formatter: {}", e)
+            }
         }
     }
 }

@@ -13,7 +13,7 @@ pub use register::{RegisterContent, Registers};
 pub use undo::{Change, UndoEntry, UndoStack};
 
 use crate::commands::CommandLine;
-use crate::config::{KeymapLookup, LeaderAction, Settings};
+use crate::config::{KeymapLookup, LeaderAction, LeaderHint, Settings};
 use crate::explorer::FileExplorer;
 use crate::finder::FuzzyFinder;
 use crate::frecency::FrecencyDb;
@@ -25,6 +25,7 @@ use crate::syntax::SyntaxManager;
 use crate::theme::ThemeManager;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthChar;
 
 /// The current mode of the editor
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -65,11 +66,44 @@ impl Mode {
     }
 }
 
+#[derive(Debug, Clone)]
+struct TagToken {
+    name: String,
+    start: usize,
+    end: usize,
+    kind: TagTokenKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TagTokenKind {
+    Open,
+    Close,
+    SelfClosing,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DisplayLineSegment {
+    start_col: usize,
+    end_col: usize,
+    indent_width: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DisplayLineTarget {
+    Start,
+    End,
+    FirstNonBlank,
+}
+
 /// Pending LSP action requested by key handler
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LspAction {
     /// Go to definition (gd)
     GotoDefinition,
+    /// Go to declaration (gD)
+    GotoDeclaration,
+    /// Go to implementation (gI)
+    GotoImplementation,
     /// Show hover documentation (K)
     Hover,
     /// Format document
@@ -481,6 +515,11 @@ impl ChangeList {
         }
     }
 
+    /// Get the most recent change position without changing list navigation.
+    pub fn latest(&self) -> Option<&ChangeLocation> {
+        self.changes.last()
+    }
+
     /// Check if we have any changes recorded
     pub fn is_empty(&self) -> bool {
         self.changes.is_empty()
@@ -697,6 +736,8 @@ pub struct Editor {
     buffers: Vec<Buffer>,
     /// Index of the currently active buffer
     current_buffer_idx: usize,
+    /// Path of the previously active file buffer, for the `"#` register.
+    alternate_file_path: Option<std::path::PathBuf>,
     /// All panes (windows)
     panes: Vec<Pane>,
     /// Index of the currently active pane
@@ -820,6 +861,14 @@ pub struct Editor {
     pub macros: MacroState,
     /// Last insert position for `gi` command (line, col)
     pub last_insert_position: Option<(usize, usize)>,
+    /// Text inserted during the most recently completed insert session.
+    pub last_inserted_text: Option<String>,
+    /// Text inserted during the active insert session.
+    current_inserted_text: String,
+    /// Insert mode is waiting for a register name after `<C-r>`.
+    pub pending_insert_register: bool,
+    /// Insert mode temporarily handed control to one normal-mode command after `<C-o>`.
+    pub pending_insert_normal_once: bool,
     /// Previous jump position for `''` command (path, line, col)
     /// This is the position from which the last jump was made
     pub previous_jump_position: Option<(Option<std::path::PathBuf>, usize, usize)>,
@@ -1038,6 +1087,7 @@ impl Editor {
         Self {
             buffers: vec![Buffer::new()],
             current_buffer_idx: 0,
+            alternate_file_path: None,
             panes: vec![Pane::new(0)],
             active_pane: 0,
             split_layout: SplitLayout::Vertical,
@@ -1100,10 +1150,28 @@ impl Editor {
             last_visual_selection: None,
             macros: MacroState::new(),
             last_insert_position: None,
+            last_inserted_text: None,
+            current_inserted_text: String::new(),
+            pending_insert_register: false,
+            pending_insert_normal_once: false,
             previous_jump_position: None,
             languages_config: crate::config::load_languages_config(),
             startup_errors,
         }
+    }
+
+    /// Visible leader continuations for the current leader prefix.
+    pub fn leader_popup_items(&self) -> Vec<LeaderHint> {
+        if !self.settings.keymap.show_leader_popup {
+            return Vec::new();
+        }
+        if !matches!(self.mode, Mode::Normal | Mode::Explorer) {
+            return Vec::new();
+        }
+        let Some(prefix) = self.leader_sequence.as_deref() else {
+            return Vec::new();
+        };
+        self.keymap.leader_hints(prefix)
     }
 
     /// Take any startup errors (clears them after returning)
@@ -1986,6 +2054,10 @@ impl Editor {
         }
     }
 
+    fn remember_current_file_as_alternate(&mut self) {
+        self.alternate_file_path = self.buffers[self.current_buffer_idx].path.clone();
+    }
+
     // ============================================
     // Pane Management
     // ============================================
@@ -2142,6 +2214,71 @@ impl Editor {
         }
     }
 
+    /// Make all pane rectangles equal according to the current split layout.
+    pub fn equalize_windows(&mut self) {
+        self.update_pane_rects();
+        self.set_status("Windows equalized");
+    }
+
+    /// Rotate pane order down/right according to the current split layout.
+    pub fn rotate_windows_down_right(&mut self) {
+        self.rotate_windows(true);
+    }
+
+    /// Rotate pane order up/left according to the current split layout.
+    pub fn rotate_windows_up_left(&mut self) {
+        self.rotate_windows(false);
+    }
+
+    fn rotate_windows(&mut self, down_right: bool) {
+        let pane_count = self.panes.len();
+        if pane_count <= 1 {
+            self.set_status("Only one window");
+            return;
+        }
+
+        self.save_pane_state();
+        let old_active = self.active_pane;
+        if down_right {
+            self.panes.rotate_right(1);
+            self.active_pane = (old_active + 1) % pane_count;
+            self.set_status("Windows rotated");
+        } else {
+            self.panes.rotate_left(1);
+            self.active_pane = if old_active == 0 {
+                pane_count - 1
+            } else {
+                old_active - 1
+            };
+            self.set_status("Windows rotated reverse");
+        }
+        self.update_pane_rects();
+        self.load_pane_state();
+    }
+
+    /// Exchange the current pane with the next pane, or previous if current is last.
+    pub fn exchange_window_with_next(&mut self) {
+        let pane_count = self.panes.len();
+        if pane_count <= 1 {
+            self.set_status("Only one window");
+            return;
+        }
+
+        self.save_pane_state();
+        let old_active = self.active_pane;
+        let target = if old_active + 1 < pane_count {
+            old_active + 1
+        } else {
+            old_active - 1
+        };
+
+        self.panes.swap(old_active, target);
+        self.active_pane = target;
+        self.update_pane_rects();
+        self.load_pane_state();
+        self.set_status("Windows exchanged");
+    }
+
     /// Move to a pane in the specified direction
     pub fn move_to_pane_direction(&mut self, direction: PaneDirection) {
         // Special case: if moving left with only one pane and explorer is visible, focus explorer
@@ -2218,6 +2355,9 @@ impl Editor {
             .position(|b| b.path.as_ref().and_then(|p| p.canonicalize().ok()) == canonical_path)
         {
             // File already open, switch to that buffer
+            if existing_idx != self.current_buffer_idx {
+                self.remember_current_file_as_alternate();
+            }
             self.save_pane_state();
             self.current_buffer_idx = existing_idx;
             self.load_current_undo_stack();
@@ -2252,6 +2392,7 @@ impl Editor {
             self.reset_current_undo_stack();
             // Update active pane's buffer_idx (it's already pointing to current_buffer_idx)
         } else {
+            self.remember_current_file_as_alternate();
             self.save_pane_state();
             self.buffers.push(new_buffer);
             self.undo_stacks.push(UndoStack::new());
@@ -2460,14 +2601,13 @@ impl Editor {
 
     fn enter_insert_mode_at_change(&mut self, line: usize, col: usize) {
         self.mode = Mode::Insert;
+        self.begin_insert_session();
         self.cursor.line = line.min(
             self.buffers[self.current_buffer_idx]
                 .len_lines()
                 .saturating_sub(1),
         );
-        self.cursor.col = col.min(
-            self.buffers[self.current_buffer_idx].line_len(self.cursor.line),
-        );
+        self.cursor.col = col.min(self.buffers[self.current_buffer_idx].line_len(self.cursor.line));
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.clamp_cursor();
         self.scroll_to_cursor();
@@ -2525,6 +2665,181 @@ impl Editor {
         } else {
             pane_width.saturating_sub(SIGN_COLUMN_WIDTH)
         }
+    }
+
+    fn effective_wrap_width(&self) -> usize {
+        self.settings.editor.wrap_width.min(self.text_area_width())
+    }
+
+    fn display_char_width(ch: char, tab_width: usize) -> usize {
+        if ch == '\t' {
+            tab_width.max(1)
+        } else if ch.is_control() {
+            1
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(0)
+        }
+    }
+
+    fn display_width_between_cols(
+        line: &str,
+        start_col: usize,
+        end_col: usize,
+        tab_width: usize,
+    ) -> usize {
+        if end_col <= start_col {
+            return 0;
+        }
+
+        line.chars()
+            .enumerate()
+            .skip(start_col)
+            .take(end_col - start_col)
+            .take_while(|(_, ch)| *ch != '\n')
+            .map(|(_, ch)| Self::display_char_width(ch, tab_width))
+            .sum()
+    }
+
+    fn display_line_segments(
+        line: &str,
+        max_width: usize,
+        tab_width: usize,
+    ) -> Vec<DisplayLineSegment> {
+        let line = line.trim_end_matches('\n');
+        let chars: Vec<char> = line.chars().collect();
+
+        if chars.is_empty() {
+            return vec![DisplayLineSegment {
+                start_col: 0,
+                end_col: 0,
+                indent_width: 0,
+            }];
+        }
+
+        if max_width == 0
+            || Self::display_width_between_cols(line, 0, chars.len(), tab_width) <= max_width
+        {
+            return vec![DisplayLineSegment {
+                start_col: 0,
+                end_col: chars.len(),
+                indent_width: 0,
+            }];
+        }
+
+        let mut indent_width = 0;
+        for ch in chars.iter().take_while(|c| c.is_whitespace()) {
+            let ch_width = Self::display_char_width(*ch, tab_width);
+            if indent_width + ch_width >= max_width {
+                break;
+            }
+            indent_width += ch_width;
+        }
+
+        let mut segments = Vec::new();
+        let mut current_col = 0;
+        let mut is_first = true;
+
+        while current_col < chars.len() {
+            let segment_indent_width = if is_first { 0 } else { indent_width };
+            let available_width = if is_first {
+                max_width
+            } else {
+                max_width.saturating_sub(indent_width)
+            };
+
+            let mut take_count = 0;
+            let mut segment_width = 0;
+
+            if available_width == 0 {
+                take_count = 1;
+            } else {
+                while current_col + take_count < chars.len() {
+                    let ch = chars[current_col + take_count];
+                    let ch_width = Self::display_char_width(ch, tab_width);
+                    if segment_width + ch_width > available_width {
+                        if take_count == 0 {
+                            take_count = 1;
+                        }
+                        break;
+                    }
+                    segment_width += ch_width;
+                    take_count += 1;
+                }
+            }
+
+            segments.push(DisplayLineSegment {
+                start_col: current_col,
+                end_col: (current_col + take_count).min(chars.len()),
+                indent_width: segment_indent_width,
+            });
+            current_col += take_count;
+            is_first = false;
+        }
+
+        segments
+    }
+
+    fn display_segment_for_col(
+        line: &str,
+        segments: &[DisplayLineSegment],
+        col: usize,
+        tab_width: usize,
+    ) -> (usize, usize) {
+        let line_len = line.trim_end_matches('\n').chars().count();
+        if line_len == 0 {
+            return (0, 0);
+        }
+
+        let target_col = col.min(line_len.saturating_sub(1));
+        for (idx, segment) in segments.iter().enumerate() {
+            if target_col >= segment.start_col && target_col < segment.end_col {
+                let display_col = segment.indent_width
+                    + Self::display_width_between_cols(
+                        line,
+                        segment.start_col,
+                        target_col,
+                        tab_width,
+                    );
+                return (idx, display_col);
+            }
+        }
+
+        let last_idx = segments.len().saturating_sub(1);
+        let last = &segments[last_idx];
+        let display_col = last.indent_width
+            + Self::display_width_between_cols(line, last.start_col, target_col, tab_width);
+        (last_idx, display_col)
+    }
+
+    fn display_col_to_buffer_col(
+        line: &str,
+        segment: DisplayLineSegment,
+        desired_display_col: usize,
+        tab_width: usize,
+    ) -> usize {
+        if segment.end_col <= segment.start_col {
+            return segment.start_col;
+        }
+
+        let desired = desired_display_col.saturating_sub(segment.indent_width);
+        let mut width = 0;
+        for (idx, ch) in line
+            .chars()
+            .enumerate()
+            .skip(segment.start_col)
+            .take(segment.end_col - segment.start_col)
+        {
+            if width >= desired {
+                return idx;
+            }
+            let ch_width = Self::display_char_width(ch, tab_width);
+            if width + ch_width > desired {
+                return idx;
+            }
+            width += ch_width;
+        }
+
+        segment.end_col.saturating_sub(1)
     }
 
     /// Get the text in a range (for yank/delete operations)
@@ -2804,7 +3119,43 @@ impl Editor {
 
     /// Paste after cursor from a register
     pub fn paste_after(&mut self, register: Option<char>) {
-        if let Some(content) = self.registers.get_content(register) {
+        self.paste_after_with_cursor_after(register, false);
+    }
+
+    /// Paste after cursor and leave cursor after the pasted text.
+    pub fn paste_after_move(&mut self, register: Option<char>) {
+        self.paste_after_with_cursor_after(register, true);
+    }
+
+    fn register_content_for_paste(&mut self, register: Option<char>) -> Option<RegisterContent> {
+        match register {
+            Some('%') => self
+                .buffer()
+                .path
+                .as_ref()
+                .map(|path| RegisterContent::Chars(path.to_string_lossy().to_string())),
+            Some(':') => self
+                .command_line
+                .history
+                .last()
+                .cloned()
+                .map(RegisterContent::Chars),
+            Some('#') => self
+                .alternate_file_path
+                .as_ref()
+                .map(|path| RegisterContent::Chars(path.to_string_lossy().to_string())),
+            Some('.') => self
+                .last_inserted_text
+                .as_ref()
+                .filter(|text| !text.is_empty())
+                .cloned()
+                .map(RegisterContent::Chars),
+            _ => self.registers.get_content(register),
+        }
+    }
+
+    fn paste_after_with_cursor_after(&mut self, register: Option<char>, cursor_after: bool) {
+        if let Some(content) = self.register_content_for_paste(register) {
             self.begin_change();
 
             match content {
@@ -2828,9 +3179,19 @@ impl Editor {
                     );
                     self.cursor.line += 1;
                     self.cursor.col = 0;
+                    let first_inserted_line = self.cursor.line;
+                    let inserted_line_count = Self::linewise_paste_line_count(trimmed);
 
                     // Insert the lines (without trailing newline if present)
                     self.buffers[self.current_buffer_idx].insert_str(self.cursor.line, 0, trimmed);
+                    if cursor_after {
+                        self.cursor.line = (first_inserted_line + inserted_line_count).min(
+                            self.buffers[self.current_buffer_idx]
+                                .len_lines()
+                                .saturating_sub(1),
+                        );
+                        self.cursor.col = 0;
+                    }
 
                     self.scroll_to_cursor();
                 }
@@ -2855,7 +3216,13 @@ impl Editor {
                         insert_col,
                         &text,
                     );
-                    self.cursor.col = insert_col + text.len().saturating_sub(1);
+                    let pasted_len = text.chars().count();
+                    self.cursor.col = insert_col
+                        + if cursor_after {
+                            pasted_len
+                        } else {
+                            pasted_len.saturating_sub(1)
+                        };
                     self.clamp_cursor();
                 }
             }
@@ -2873,14 +3240,32 @@ impl Editor {
         }
     }
 
+    /// Paste after cursor count times and leave cursor after the pasted text.
+    pub fn paste_after_move_count(&mut self, register: Option<char>, count: usize) {
+        for _ in 0..count.max(1) {
+            self.paste_after_move(register);
+        }
+    }
+
     /// Paste before cursor from a register
     pub fn paste_before(&mut self, register: Option<char>) {
-        if let Some(content) = self.registers.get_content(register) {
+        self.paste_before_with_cursor_after(register, false);
+    }
+
+    /// Paste before cursor and leave cursor after the pasted text.
+    pub fn paste_before_move(&mut self, register: Option<char>) {
+        self.paste_before_with_cursor_after(register, true);
+    }
+
+    fn paste_before_with_cursor_after(&mut self, register: Option<char>, cursor_after: bool) {
+        if let Some(content) = self.register_content_for_paste(register) {
             self.begin_change();
 
             match content {
                 RegisterContent::Lines(text) => {
                     // Paste on new line above
+                    let insert_line = self.cursor.line;
+                    let inserted_line_count = Self::linewise_paste_line_count(&text);
                     let insert_text = if text.ends_with('\n') {
                         text.clone()
                     } else {
@@ -2903,6 +3288,13 @@ impl Editor {
                         );
                     }
                     self.cursor.col = 0;
+                    if cursor_after {
+                        self.cursor.line = (insert_line + inserted_line_count).min(
+                            self.buffers[self.current_buffer_idx]
+                                .len_lines()
+                                .saturating_sub(1),
+                        );
+                    }
                     self.scroll_to_cursor();
                 }
                 RegisterContent::Chars(text) => {
@@ -2919,7 +3311,13 @@ impl Editor {
                         self.cursor.col,
                         &text,
                     );
-                    self.cursor.col = self.cursor.col + text.len().saturating_sub(1);
+                    let pasted_len = text.chars().count();
+                    self.cursor.col = self.cursor.col
+                        + if cursor_after {
+                            pasted_len
+                        } else {
+                            pasted_len.saturating_sub(1)
+                        };
                     self.clamp_cursor();
                 }
             }
@@ -2937,10 +3335,22 @@ impl Editor {
         }
     }
 
+    /// Paste before cursor count times and leave cursor after the pasted text.
+    pub fn paste_before_move_count(&mut self, register: Option<char>, count: usize) {
+        for _ in 0..count.max(1) {
+            self.paste_before_move(register);
+        }
+    }
+
+    fn linewise_paste_line_count(text: &str) -> usize {
+        text.trim_end_matches('\n').split('\n').count().max(1)
+    }
+
     /// Enter insert mode
     pub fn enter_insert_mode(&mut self) {
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
         self.begin_change();
     }
 
@@ -2952,6 +3362,7 @@ impl Editor {
         }
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
         self.begin_change();
     }
 
@@ -2960,6 +3371,7 @@ impl Editor {
         self.cursor.col = self.buffers[self.current_buffer_idx].line_len(self.cursor.line);
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
         self.begin_change();
     }
 
@@ -2973,6 +3385,7 @@ impl Editor {
                     self.cursor.col = col;
                     self.last_insert_position = Some((self.cursor.line, self.cursor.col));
                     self.mode = Mode::Insert;
+                    self.begin_insert_session();
                     self.begin_change();
                     return;
                 }
@@ -2981,7 +3394,94 @@ impl Editor {
         self.cursor.col = 0;
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
         self.begin_change();
+    }
+
+    /// Temporarily leave insert mode so the next normal command can run.
+    pub fn enter_insert_normal_once(&mut self) {
+        self.pending_insert_register = false;
+        self.pending_insert_normal_once = true;
+        self.enter_normal_mode();
+    }
+
+    /// Return to insert mode after the one-shot normal command has completed.
+    pub fn finish_insert_normal_once(&mut self) {
+        self.pending_insert_normal_once = false;
+        self.last_insert_position = Some((self.cursor.line, self.cursor.col));
+        self.mode = Mode::Insert;
+        self.begin_insert_session();
+        self.begin_change();
+        self.clamp_cursor();
+        self.scroll_to_cursor();
+    }
+
+    fn begin_insert_session(&mut self) {
+        self.current_inserted_text.clear();
+    }
+
+    fn finish_insert_session(&mut self) {
+        if !self.current_inserted_text.is_empty() {
+            self.last_inserted_text = Some(std::mem::take(&mut self.current_inserted_text));
+        } else {
+            self.current_inserted_text.clear();
+        }
+    }
+
+    fn record_inserted_text(&mut self, text: &str) {
+        if self.mode == Mode::Insert {
+            self.current_inserted_text.push_str(text);
+        }
+    }
+
+    fn record_inserted_char(&mut self, ch: char) {
+        if self.mode == Mode::Insert {
+            self.current_inserted_text.push(ch);
+        }
+    }
+
+    fn insert_text_at_cursor(&mut self, text: &str) {
+        let start_line = self.cursor.line;
+        let start_col = self.cursor.col;
+        self.undo_stack
+            .record_change(Change::insert(start_line, start_col, text.to_string()));
+        self.buffers[self.current_buffer_idx].insert_str(start_line, start_col, text);
+        self.record_inserted_text(text);
+        let (end_line, end_col) = Self::text_position_after_insert(start_line, start_col, text);
+        self.cursor.line = end_line;
+        self.cursor.col = end_col;
+        self.scroll_to_cursor();
+    }
+
+    /// Insert text from a register at the cursor while in insert mode.
+    pub fn insert_register_text(&mut self, register: char) -> bool {
+        let Some(content) = self.register_content_for_paste(Some(register)) else {
+            return false;
+        };
+        let text = match content {
+            RegisterContent::Chars(text) | RegisterContent::Lines(text) => text,
+        };
+        if text.is_empty() {
+            return false;
+        }
+
+        self.insert_text_at_cursor(&text);
+        true
+    }
+
+    /// Insert the text from the previous completed insert session.
+    pub fn insert_last_inserted_text(&mut self) -> bool {
+        let Some(text) = self
+            .last_inserted_text
+            .as_ref()
+            .filter(|text| !text.is_empty())
+            .cloned()
+        else {
+            return false;
+        };
+
+        self.insert_text_at_cursor(&text);
+        true
     }
 
     /// Enter replace mode
@@ -3071,6 +3571,10 @@ impl Editor {
 
     /// Exit to normal mode
     pub fn enter_normal_mode(&mut self) {
+        if self.mode == Mode::Insert {
+            self.finish_insert_session();
+        }
+
         // End any current undo group
         self.undo_stack
             .end_undo_group(self.cursor.line, self.cursor.col);
@@ -3118,6 +3622,7 @@ impl Editor {
                 );
                 self.cursor.col += 1;
             }
+            self.record_inserted_char(ch);
         }
         self.scroll_to_cursor();
     }
@@ -3163,6 +3668,7 @@ impl Editor {
                             self.cursor.col,
                             &insert_text,
                         );
+                        self.record_inserted_text(&insert_text);
 
                         // Move cursor to the indented middle line
                         self.cursor.line += 1;
@@ -3181,6 +3687,7 @@ impl Editor {
                             self.cursor.col,
                             &insert_text,
                         );
+                        self.record_inserted_text(&insert_text);
 
                         self.cursor.line += 1;
                         self.cursor.col = indent.len();
@@ -3246,6 +3753,7 @@ impl Editor {
                 self.cursor.col,
                 &insert_text,
             );
+            self.record_inserted_text(&insert_text);
 
             // Move cursor to the indented middle line
             self.cursor.line += 1;
@@ -3264,6 +3772,7 @@ impl Editor {
                 self.cursor.col,
                 &insert_text,
             );
+            self.record_inserted_text(&insert_text);
 
             self.cursor.line += 1;
             self.cursor.col = indent.len();
@@ -3326,6 +3835,7 @@ impl Editor {
                         bracket,
                     );
                     self.cursor.col += 1;
+                    self.record_inserted_char(bracket);
                     return;
                 }
             }
@@ -3368,6 +3878,7 @@ impl Editor {
             bracket,
         );
         self.cursor.col += 1;
+        self.record_inserted_char(bracket);
     }
 
     /// Check if cursor is preceded only by whitespace on current line
@@ -3646,6 +4157,8 @@ impl Editor {
         self.cursor.col = indent.len();
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
+        self.record_inserted_text(&insert_text);
         self.scroll_to_cursor();
     }
 
@@ -3670,6 +4183,8 @@ impl Editor {
         self.cursor.col = indent.len();
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
+        self.begin_insert_session();
+        self.record_inserted_text(&insert_text);
         self.scroll_to_cursor();
     }
 
@@ -3786,9 +4301,18 @@ impl Editor {
         }
     }
 
-    /// Jump to previous position ('' command)
-    /// This jumps to the position before the last jump, and toggles back on repeated use
-    pub fn jump_to_previous_position(&mut self) -> bool {
+    /// Jump to the line of the previous position ('' command).
+    pub fn jump_to_previous_position_line(&mut self) -> bool {
+        self.jump_to_previous_position(false)
+    }
+
+    /// Jump to the exact previous position (`` command).
+    pub fn jump_to_previous_position_exact(&mut self) -> bool {
+        self.jump_to_previous_position(true)
+    }
+
+    /// Jump to previous position and toggle back on repeated use.
+    fn jump_to_previous_position(&mut self, exact: bool) -> bool {
         if let Some((prev_path, prev_line, prev_col)) = self.previous_jump_position.take() {
             // Save current position so we can toggle back
             let current_path = self.buffer().path.clone();
@@ -3806,7 +4330,11 @@ impl Editor {
             }
 
             self.cursor.line = prev_line;
-            self.cursor.col = prev_col;
+            self.cursor.col = if exact {
+                prev_col
+            } else {
+                self.find_first_non_blank(self.cursor.line)
+            };
             self.clamp_cursor();
             self.scroll_to_cursor();
             true
@@ -3833,6 +4361,58 @@ impl Editor {
         if let Some(loc) = self.change_list.go_newer().cloned() {
             self.cursor.line = loc.line;
             self.cursor.col = loc.col;
+            self.clamp_cursor();
+            self.scroll_to_cursor();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Jump to the line of the last change ('. command).
+    pub fn jump_to_last_change_line(&mut self) -> bool {
+        self.jump_to_last_change(false)
+    }
+
+    /// Jump to the exact position of the last change (`. command).
+    pub fn jump_to_last_change_exact(&mut self) -> bool {
+        self.jump_to_last_change(true)
+    }
+
+    fn jump_to_last_change(&mut self, exact: bool) -> bool {
+        if let Some(loc) = self.change_list.latest().cloned() {
+            self.cursor.line = loc.line;
+            self.cursor.col = if exact {
+                loc.col
+            } else {
+                self.find_first_non_blank(loc.line)
+            };
+            self.clamp_cursor();
+            self.scroll_to_cursor();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Jump to the line of the last insert ('^ command).
+    pub fn jump_to_last_insert_line(&mut self) -> bool {
+        self.jump_to_last_insert(false)
+    }
+
+    /// Jump to the exact position of the last insert (`^ command).
+    pub fn jump_to_last_insert_exact(&mut self) -> bool {
+        self.jump_to_last_insert(true)
+    }
+
+    fn jump_to_last_insert(&mut self, exact: bool) -> bool {
+        if let Some((line, col)) = self.last_insert_position {
+            self.cursor.line = line;
+            self.cursor.col = if exact {
+                col
+            } else {
+                self.find_first_non_blank(line)
+            };
             self.clamp_cursor();
             self.scroll_to_cursor();
             true
@@ -4309,6 +4889,89 @@ impl Editor {
         }
     }
 
+    /// Search forward for the last pattern and select the match (gn).
+    pub fn search_select_next(&mut self, count: usize) {
+        self.search_select_match(SearchDirection::Forward, count);
+    }
+
+    /// Search backward for the last pattern and select the match (gN).
+    pub fn search_select_prev(&mut self, count: usize) {
+        self.search_select_match(SearchDirection::Backward, count);
+    }
+
+    fn search_select_match(&mut self, direction: SearchDirection, count: usize) {
+        let Some(pattern) = self.search.last_pattern.clone() else {
+            self.set_status("No previous search pattern");
+            return;
+        };
+
+        self.update_search_matches_from_pattern(&pattern);
+
+        let Some((line, start_col, end_col)) =
+            self.search_match_from_cursor(direction, count.max(1))
+        else {
+            self.set_status(format!("Pattern not found: {}", pattern));
+            return;
+        };
+
+        self.record_jump();
+        self.mode = Mode::Visual;
+        self.visual = VisualSelection::new(line, start_col);
+        self.cursor.line = line;
+        self.cursor.col = end_col.saturating_sub(1).max(start_col);
+        self.scroll_to_cursor();
+    }
+
+    fn search_match_from_cursor(
+        &self,
+        direction: SearchDirection,
+        count: usize,
+    ) -> Option<(usize, usize, usize)> {
+        if self.search_matches.is_empty() {
+            return None;
+        }
+
+        let cursor_line = self.cursor.line;
+        let cursor_col = self.cursor.col;
+        let mut ordered = Vec::with_capacity(self.search_matches.len());
+
+        match direction {
+            SearchDirection::Forward => {
+                ordered.extend(
+                    self.search_matches
+                        .iter()
+                        .copied()
+                        .filter(|(line, _, end_col)| {
+                            *line > cursor_line || (*line == cursor_line && *end_col > cursor_col)
+                        }),
+                );
+                ordered.extend(
+                    self.search_matches
+                        .iter()
+                        .copied()
+                        .filter(|(line, _, end_col)| {
+                            !(*line > cursor_line
+                                || (*line == cursor_line && *end_col > cursor_col))
+                        }),
+                );
+            }
+            SearchDirection::Backward => {
+                ordered.extend(self.search_matches.iter().rev().copied().filter(
+                    |(line, start_col, _)| {
+                        *line < cursor_line || (*line == cursor_line && *start_col <= cursor_col)
+                    },
+                ));
+                ordered.extend(self.search_matches.iter().rev().copied().filter(
+                    |(line, start_col, _)| {
+                        !(*line < cursor_line || (*line == cursor_line && *start_col <= cursor_col))
+                    },
+                ));
+            }
+        }
+
+        ordered.get((count - 1) % ordered.len()).copied()
+    }
+
     /// Get the word under the cursor
     pub fn get_word_under_cursor(&self) -> Option<String> {
         let line = self.buffers[self.current_buffer_idx].line(self.cursor.line)?;
@@ -4341,6 +5004,182 @@ impl Editor {
         } else {
             None
         }
+    }
+
+    /// Resolve a path-like token under the cursor for `gf`.
+    pub fn file_path_under_cursor(&self) -> Option<std::path::PathBuf> {
+        let token = self.get_file_token_under_cursor()?;
+        let primary = self.resolve_cursor_file_token(&token);
+        if primary.exists() {
+            return Some(primary);
+        }
+
+        let trimmed = token.trim_end_matches(|ch| matches!(ch, '.' | ',' | ';' | ':'));
+        if trimmed != token {
+            let fallback = self.resolve_cursor_file_token(trimmed);
+            if fallback.exists() {
+                return Some(fallback);
+            }
+        }
+
+        Some(primary)
+    }
+
+    pub fn open_file_under_cursor(&mut self) -> Result<std::path::PathBuf, String> {
+        let path = self
+            .file_path_under_cursor()
+            .ok_or_else(|| "No file under cursor".to_string())?;
+        if !path.exists() {
+            return Err(format!("File not found: {}", path.display()));
+        }
+
+        self.open_file(path.clone())
+            .map_err(|err| format!("Error opening file: {}", err))?;
+        Ok(path)
+    }
+
+    /// Open the URL under the cursor using the platform default browser.
+    pub fn open_url_under_cursor(&mut self) -> Result<String, String> {
+        self.open_url_under_cursor_with(Self::open_url_external)
+    }
+
+    /// Open the URL under the cursor with an injected opener.
+    pub fn open_url_under_cursor_with<F>(&mut self, mut opener: F) -> Result<String, String>
+    where
+        F: FnMut(&str) -> Result<(), String>,
+    {
+        let url = self
+            .url_under_cursor()
+            .ok_or_else(|| "No URL under cursor".to_string())?;
+        opener(&url)?;
+        Ok(url)
+    }
+
+    /// Resolve the URL token under the cursor for `gx`.
+    pub fn url_under_cursor(&self) -> Option<String> {
+        let line = self.buffers[self.current_buffer_idx].line(self.cursor.line)?;
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+
+        let col = self.cursor.col.min(chars.len().saturating_sub(1));
+        if Self::is_url_delimiter(chars[col]) {
+            return None;
+        }
+
+        let mut start = col;
+        while start > 0 && !Self::is_url_delimiter(chars[start - 1]) {
+            start -= 1;
+        }
+
+        let mut end = col;
+        while end < chars.len() && !Self::is_url_delimiter(chars[end]) {
+            end += 1;
+        }
+
+        let token: String = chars[start..end].iter().collect();
+        Self::trim_url_token(&token)
+    }
+
+    fn trim_url_token(token: &str) -> Option<String> {
+        let trimmed = token
+            .trim_start_matches(|ch| matches!(ch, '(' | '[' | '{' | '<' | '"' | '\''))
+            .trim_end_matches(|ch| {
+                matches!(
+                    ch,
+                    '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>' | '"' | '\''
+                )
+            });
+
+        Self::is_supported_url(trimmed).then(|| trimmed.to_string())
+    }
+
+    fn is_url_delimiter(ch: char) -> bool {
+        ch.is_whitespace()
+    }
+
+    fn is_supported_url(token: &str) -> bool {
+        let lower = token.to_ascii_lowercase();
+        lower.starts_with("http://") || lower.starts_with("https://")
+    }
+
+    fn open_url_external(url: &str) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        let mut command = {
+            let mut command = std::process::Command::new("open");
+            command.arg(url);
+            command
+        };
+
+        #[cfg(target_os = "linux")]
+        let mut command = {
+            let mut command = std::process::Command::new("xdg-open");
+            command.arg(url);
+            command
+        };
+
+        #[cfg(target_os = "windows")]
+        let mut command = {
+            let mut command = std::process::Command::new("cmd");
+            command.args(["/C", "start", "", url]);
+            command
+        };
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        {
+            let _ = url;
+            return Err("Opening URLs is not supported on this platform".to_string());
+        }
+
+        command
+            .spawn()
+            .map(|_| ())
+            .map_err(|err| format!("Failed to open URL: {}", err))
+    }
+
+    fn get_file_token_under_cursor(&self) -> Option<String> {
+        let line = self.buffers[self.current_buffer_idx].line(self.cursor.line)?;
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+
+        let col = self.cursor.col.min(chars.len().saturating_sub(1));
+        if !Self::is_file_path_char(chars[col]) {
+            return None;
+        }
+
+        let mut start = col;
+        while start > 0 && Self::is_file_path_char(chars[start - 1]) {
+            start -= 1;
+        }
+
+        let mut end = col;
+        while end < chars.len() && Self::is_file_path_char(chars[end]) {
+            end += 1;
+        }
+
+        (start < end).then(|| chars[start..end].iter().collect())
+    }
+
+    fn resolve_cursor_file_token(&self, token: &str) -> std::path::PathBuf {
+        let path = std::path::PathBuf::from(token);
+        if path.is_absolute() {
+            return path;
+        }
+
+        let base = self
+            .buffer()
+            .path
+            .as_ref()
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(|| self.working_directory());
+        base.join(path)
+    }
+
+    fn is_file_path_char(ch: char) -> bool {
+        ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '\\' | '~')
     }
 
     /// Check if a character is a word character (alphanumeric or underscore)
@@ -5165,6 +6004,9 @@ impl Editor {
             TextObjectType::AngleBracket => {
                 self.find_bracket_object(text_object.modifier, '<', '>')
             }
+            TextObjectType::Paragraph => self.find_paragraph_object(text_object.modifier),
+            TextObjectType::Sentence => self.find_sentence_object(text_object.modifier),
+            TextObjectType::Tag => self.find_tag_object(text_object.modifier),
         }
     }
 
@@ -5263,6 +6105,315 @@ impl Editor {
         }
 
         Some((line, start, line, end))
+    }
+
+    /// Find paragraph text object boundaries separated by blank lines.
+    fn find_paragraph_object(
+        &self,
+        modifier: TextObjectModifier,
+    ) -> Option<(usize, usize, usize, usize)> {
+        let buffer = &self.buffers[self.current_buffer_idx];
+        let line_count = buffer.len_lines();
+        if line_count == 0 {
+            return None;
+        }
+
+        let is_blank = |line: usize| -> bool {
+            buffer
+                .line(line)
+                .map(|text| text.chars().all(char::is_whitespace))
+                .unwrap_or(true)
+        };
+
+        let cursor_line = self.cursor.line.min(line_count.saturating_sub(1));
+        let line = if is_blank(cursor_line) {
+            let next = (cursor_line + 1..line_count).find(|&line| !is_blank(line));
+            next.or_else(|| (0..cursor_line).rev().find(|&line| !is_blank(line)))?
+        } else {
+            cursor_line
+        };
+
+        let mut start_line = line;
+        while start_line > 0 && !is_blank(start_line - 1) {
+            start_line -= 1;
+        }
+
+        let mut end_line = line;
+        while end_line + 1 < line_count && !is_blank(end_line + 1) {
+            end_line += 1;
+        }
+
+        if modifier == TextObjectModifier::Around {
+            if end_line + 1 < line_count && is_blank(end_line + 1) {
+                end_line += 1;
+            } else if start_line > 0 && is_blank(start_line - 1) {
+                start_line -= 1;
+            }
+        }
+
+        Some((start_line, 0, end_line, buffer.line_len(end_line)))
+    }
+
+    /// Find sentence text object boundaries.
+    fn find_sentence_object(
+        &self,
+        modifier: TextObjectModifier,
+    ) -> Option<(usize, usize, usize, usize)> {
+        let buffer = &self.buffers[self.current_buffer_idx];
+        let chars: Vec<char> = buffer.content().chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+
+        let ranges = Self::sentence_object_ranges(&chars);
+        if ranges.is_empty() {
+            return None;
+        }
+
+        let cursor_idx = buffer
+            .line_col_to_char(self.cursor.line, self.cursor.col)
+            .min(chars.len().saturating_sub(1));
+        let &(start, body_end, around_end) = ranges
+            .iter()
+            .find(|(start, _, around_end)| cursor_idx >= *start && cursor_idx <= *around_end)
+            .or_else(|| ranges.iter().find(|(start, _, _)| *start > cursor_idx))
+            .or_else(|| ranges.last())?;
+
+        let end = if modifier == TextObjectModifier::Around {
+            around_end
+        } else {
+            body_end
+        };
+        let (start_line, start_col) = Self::char_index_to_line_col(buffer, start);
+        let (end_line, end_col) = Self::char_index_to_line_col(buffer, end);
+        Some((start_line, start_col, end_line, end_col))
+    }
+
+    fn sentence_object_ranges(chars: &[char]) -> Vec<(usize, usize, usize)> {
+        let mut ranges = Vec::new();
+        let Some(mut start) = Self::skip_sentence_space(chars, 0) else {
+            return ranges;
+        };
+
+        while start < chars.len() {
+            let mut scan = start;
+            let mut body_end = None;
+            while scan < chars.len() {
+                if Self::is_sentence_end(chars[scan]) {
+                    let after_closers = Self::skip_sentence_closers(chars, scan + 1);
+                    if after_closers >= chars.len() || chars[after_closers].is_whitespace() {
+                        body_end = Some(after_closers.saturating_sub(1));
+                        break;
+                    }
+                    scan = after_closers;
+                } else {
+                    scan += 1;
+                }
+            }
+
+            let body_end = body_end.unwrap_or_else(|| {
+                let mut end = chars.len().saturating_sub(1);
+                while end > start && chars[end].is_whitespace() {
+                    end -= 1;
+                }
+                end
+            });
+            let mut around_end = body_end;
+            while around_end + 1 < chars.len() && chars[around_end + 1].is_whitespace() {
+                around_end += 1;
+            }
+            ranges.push((start, body_end, around_end));
+
+            let Some(next_start) = Self::skip_sentence_space(chars, around_end + 1) else {
+                break;
+            };
+            if next_start <= start {
+                break;
+            }
+            start = next_start;
+        }
+
+        ranges
+    }
+
+    fn is_sentence_end(ch: char) -> bool {
+        matches!(ch, '.' | '!' | '?')
+    }
+
+    fn skip_sentence_closers(chars: &[char], mut idx: usize) -> usize {
+        while idx < chars.len() && matches!(chars[idx], '"' | '\'' | ')' | ']' | '}') {
+            idx += 1;
+        }
+        idx
+    }
+
+    fn skip_sentence_space(chars: &[char], mut idx: usize) -> Option<usize> {
+        while idx < chars.len() && chars[idx].is_whitespace() {
+            idx += 1;
+        }
+        (idx < chars.len()).then_some(idx)
+    }
+
+    fn char_index_to_line_col(buffer: &Buffer, char_idx: usize) -> (usize, usize) {
+        let mut remaining = char_idx;
+        for line in 0..buffer.len_lines() {
+            let len = buffer.line_len_including_newline(line);
+            if remaining < len {
+                return (line, remaining.min(buffer.line_len(line)));
+            }
+            remaining = remaining.saturating_sub(len);
+        }
+
+        let last_line = buffer.len_lines().saturating_sub(1);
+        (last_line, buffer.line_len(last_line))
+    }
+
+    /// Find HTML/XML-style tag text object boundaries.
+    fn find_tag_object(
+        &self,
+        modifier: TextObjectModifier,
+    ) -> Option<(usize, usize, usize, usize)> {
+        let buffer = &self.buffers[self.current_buffer_idx];
+        let chars: Vec<char> = buffer.content().chars().collect();
+        if chars.is_empty() {
+            return None;
+        }
+
+        let tokens = Self::tag_tokens(&chars);
+        let pairs = Self::tag_pairs(&tokens);
+        let cursor_idx = buffer
+            .line_col_to_char(self.cursor.line, self.cursor.col)
+            .min(chars.len().saturating_sub(1));
+        let &(open_idx, close_idx) = pairs
+            .iter()
+            .filter(|(open_idx, close_idx)| {
+                cursor_idx >= tokens[*open_idx].start && cursor_idx <= tokens[*close_idx].end
+            })
+            .min_by_key(|(open_idx, close_idx)| {
+                tokens[*close_idx]
+                    .end
+                    .saturating_sub(tokens[*open_idx].start)
+            })?;
+
+        let open = &tokens[open_idx];
+        let close = &tokens[close_idx];
+        let (start, end) = match modifier {
+            TextObjectModifier::Inner => {
+                let start = open.end + 1;
+                let end = close.start.checked_sub(1)?;
+                if start > end {
+                    return None;
+                }
+                (start, end)
+            }
+            TextObjectModifier::Around => (open.start, close.end),
+        };
+
+        let (start_line, start_col) = Self::char_index_to_line_col(buffer, start);
+        let (end_line, end_col) = Self::char_index_to_line_col(buffer, end);
+        Some((start_line, start_col, end_line, end_col))
+    }
+
+    fn tag_pairs(tokens: &[TagToken]) -> Vec<(usize, usize)> {
+        let mut stack: Vec<usize> = Vec::new();
+        let mut pairs = Vec::new();
+
+        for (idx, token) in tokens.iter().enumerate() {
+            match token.kind {
+                TagTokenKind::Open => stack.push(idx),
+                TagTokenKind::SelfClosing => {}
+                TagTokenKind::Close => {
+                    if let Some(open_pos) = stack
+                        .iter()
+                        .rposition(|&open_idx| tokens[open_idx].name == token.name)
+                    {
+                        let open_idx = stack.remove(open_pos);
+                        pairs.push((open_idx, idx));
+                    }
+                }
+            }
+        }
+
+        pairs
+    }
+
+    fn tag_tokens(chars: &[char]) -> Vec<TagToken> {
+        let mut tokens = Vec::new();
+        let mut idx = 0;
+
+        while idx < chars.len() {
+            if chars[idx] != '<' {
+                idx += 1;
+                continue;
+            }
+
+            let Some(end) = (idx + 1..chars.len()).find(|&candidate| chars[candidate] == '>')
+            else {
+                break;
+            };
+
+            if let Some(token) = Self::parse_tag_token(chars, idx, end) {
+                tokens.push(token);
+            }
+            idx = end + 1;
+        }
+
+        tokens
+    }
+
+    fn parse_tag_token(chars: &[char], start: usize, end: usize) -> Option<TagToken> {
+        let mut idx = start + 1;
+        while idx < end && chars[idx].is_whitespace() {
+            idx += 1;
+        }
+
+        if idx >= end || matches!(chars[idx], '!' | '?') {
+            return None;
+        }
+
+        let closing = chars[idx] == '/';
+        if closing {
+            idx += 1;
+            while idx < end && chars[idx].is_whitespace() {
+                idx += 1;
+            }
+        }
+
+        let name_start = idx;
+        while idx < end && Self::is_tag_name_char(chars[idx]) {
+            idx += 1;
+        }
+        if idx == name_start {
+            return None;
+        }
+
+        let name: String = chars[name_start..idx].iter().collect();
+        let kind = if closing {
+            TagTokenKind::Close
+        } else if Self::is_self_closing_tag(chars, start, end) {
+            TagTokenKind::SelfClosing
+        } else {
+            TagTokenKind::Open
+        };
+
+        Some(TagToken {
+            name,
+            start,
+            end,
+            kind,
+        })
+    }
+
+    fn is_tag_name_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | ':')
+    }
+
+    fn is_self_closing_tag(chars: &[char], start: usize, end: usize) -> bool {
+        let mut idx = end;
+        while idx > start && chars[idx - 1].is_whitespace() {
+            idx -= 1;
+        }
+        idx > start && chars[idx - 1] == '/'
     }
 
     /// Find quote text object boundaries
@@ -6148,6 +7299,197 @@ impl Editor {
         }
     }
 
+    /// Auto-indent a range of lines based on surrounding delimiters and syntax when available.
+    pub fn auto_indent_lines(&mut self, start_line: usize, end_line: usize) {
+        let buffer = &self.buffers[self.current_buffer_idx];
+        if buffer.len_lines() == 0 {
+            return;
+        }
+
+        let max_line = buffer.len_lines().saturating_sub(1);
+        let start_line = start_line.min(max_line);
+        let end_line = end_line.min(max_line);
+        if start_line > end_line {
+            return;
+        }
+
+        self.begin_change();
+        let mut changed = false;
+
+        for line_num in start_line..=end_line {
+            let Some(line) = self.buffers[self.current_buffer_idx].line(line_num) else {
+                continue;
+            };
+            let line_str: String = line.chars().collect();
+            let line_without_newline = line_str.trim_end_matches('\n');
+
+            if line_without_newline.trim().is_empty() {
+                continue;
+            }
+
+            let old_indent_len = line_without_newline
+                .chars()
+                .take_while(|ch| *ch == ' ' || *ch == '\t')
+                .count();
+            let old_indent: String = line_without_newline.chars().take(old_indent_len).collect();
+            let new_indent = " ".repeat(self.expected_auto_indent_for_line(line_num));
+
+            if old_indent == new_indent {
+                continue;
+            }
+
+            if !old_indent.is_empty() {
+                self.undo_stack
+                    .record_change(Change::delete(line_num, 0, old_indent.clone()));
+                self.buffers[self.current_buffer_idx].delete_range(
+                    line_num,
+                    0,
+                    line_num,
+                    old_indent_len,
+                );
+            }
+
+            if !new_indent.is_empty() {
+                self.undo_stack
+                    .record_change(Change::insert(line_num, 0, new_indent.clone()));
+                self.buffers[self.current_buffer_idx].insert_str(line_num, 0, &new_indent);
+            }
+
+            changed = true;
+        }
+
+        self.undo_stack
+            .end_undo_group(self.cursor.line, self.cursor.col);
+
+        if changed {
+            self.buffers[self.current_buffer_idx].mark_modified();
+            self.parse_current_buffer();
+        }
+
+        self.cursor.line = start_line;
+        self.cursor.col = self.find_first_non_blank(start_line);
+        self.clamp_cursor();
+    }
+
+    fn expected_auto_indent_for_line(&mut self, line_num: usize) -> usize {
+        let tab_width = self.settings.editor.tab_width;
+        if tab_width == 0 {
+            return 0;
+        }
+
+        let fallback = self.delimiter_auto_indent_for_line(line_num);
+
+        if line_num == 0 {
+            return if self.line_starts_with_closing_delimiter(line_num) {
+                fallback.saturating_sub(tab_width)
+            } else {
+                fallback
+            };
+        }
+
+        self.parse_current_buffer();
+
+        let prev_line = line_num.saturating_sub(1);
+        let prev_col = self.buffers[self.current_buffer_idx].line_len(prev_line);
+        let Some(cursor_byte) = self.syntax.position_to_byte(prev_line, prev_col) else {
+            return fallback;
+        };
+        let Some((tree, source)) = self.syntax.get_tree_and_source() else {
+            return fallback;
+        };
+
+        let mut indent = crate::indent::calculate_indent(tree, source, cursor_byte, tab_width);
+
+        if let Some(bracket) = self.line_start_closing_delimiter(line_num) {
+            if let Some(current_byte) = self.syntax.position_to_byte(line_num, 0) {
+                indent = crate::indent::calculate_closing_bracket_indent(
+                    tree,
+                    source,
+                    current_byte,
+                    bracket,
+                )
+                .unwrap_or_else(|| indent.saturating_sub(tab_width));
+            } else {
+                indent = indent.saturating_sub(tab_width);
+            }
+        }
+
+        if indent == 0 && fallback > 0 {
+            fallback
+        } else {
+            indent
+        }
+    }
+
+    fn delimiter_auto_indent_for_line(&self, line_num: usize) -> usize {
+        let tab_width = self.settings.editor.tab_width;
+        let mut level = 0usize;
+
+        for prev_line in 0..line_num {
+            let Some(line) = self.buffers[self.current_buffer_idx].line(prev_line) else {
+                continue;
+            };
+            let line_str: String = line.chars().collect();
+            for ch in Self::code_portion_before_line_comment(&line_str).chars() {
+                match ch {
+                    '{' | '[' | '(' => level = level.saturating_add(1),
+                    '}' | ']' | ')' => level = level.saturating_sub(1),
+                    _ => {}
+                }
+            }
+        }
+
+        if self.line_starts_with_closing_delimiter(line_num) {
+            level = level.saturating_sub(1);
+        }
+
+        level * tab_width
+    }
+
+    fn line_starts_with_closing_delimiter(&self, line_num: usize) -> bool {
+        self.line_start_closing_delimiter(line_num).is_some()
+    }
+
+    fn line_start_closing_delimiter(&self, line_num: usize) -> Option<char> {
+        let line = self.buffers[self.current_buffer_idx].line(line_num)?;
+        let line_str: String = line.chars().collect();
+        line_str
+            .trim_start()
+            .chars()
+            .next()
+            .and_then(|ch| match ch {
+                '}' | ']' | ')' => Some(ch),
+                _ => None,
+            })
+    }
+
+    fn code_portion_before_line_comment(line: &str) -> &str {
+        line.split_once("//")
+            .map(|(code, _)| code)
+            .unwrap_or(line)
+            .trim_end_matches('\n')
+    }
+
+    /// Auto-indent with motion (={motion}).
+    pub fn auto_indent_motion(&mut self, motion: Motion, count: usize) {
+        let start_line = self.cursor.line;
+        let text_rows = self.text_rows().max(1);
+        let Some((target_line, _)) = apply_motion(
+            &self.buffers[self.current_buffer_idx],
+            motion,
+            self.cursor.line,
+            self.cursor.col,
+            count,
+            text_rows,
+        ) else {
+            return;
+        };
+
+        let range_start = start_line.min(target_line);
+        let range_end = start_line.max(target_line);
+        self.auto_indent_lines(range_start, range_end);
+    }
+
     /// Indent current line and count-1 lines below (>> operation)
     pub fn indent_line(&mut self, count: usize) {
         let start_line = self.cursor.line;
@@ -6155,11 +7497,86 @@ impl Editor {
         self.indent_lines(start_line, end_line);
     }
 
+    /// Auto-indent current line and count-1 lines below (== operation).
+    pub fn auto_indent_line(&mut self, count: usize) {
+        let start_line = self.cursor.line;
+        let end_line = start_line + count.saturating_sub(1);
+        self.auto_indent_lines(start_line, end_line);
+    }
+
+    /// Increase indentation of the current line while preserving insert position.
+    pub fn indent_current_line_in_insert_mode(&mut self) {
+        let tab_width = self.settings.editor.tab_width;
+        if tab_width == 0 {
+            return;
+        }
+
+        let line = self.cursor.line;
+        if line >= self.buffers[self.current_buffer_idx].len_lines() {
+            return;
+        }
+
+        let indent = " ".repeat(tab_width);
+        self.undo_stack
+            .record_change(Change::insert(line, 0, indent.clone()));
+        self.buffers[self.current_buffer_idx].insert_str(line, 0, &indent);
+        self.cursor.col += tab_width;
+        self.scroll_to_cursor();
+    }
+
     /// Dedent current line and count-1 lines below (<< operation)
     pub fn dedent_line(&mut self, count: usize) {
         let start_line = self.cursor.line;
         let end_line = start_line + count.saturating_sub(1);
         self.dedent_lines(start_line, end_line);
+    }
+
+    /// Decrease indentation of the current line while preserving insert position.
+    pub fn dedent_current_line_in_insert_mode(&mut self) {
+        let tab_width = self.settings.editor.tab_width;
+        if tab_width == 0 {
+            return;
+        }
+
+        let line = self.cursor.line;
+        let Some(line_text) = self.buffers[self.current_buffer_idx].line(line) else {
+            return;
+        };
+
+        let mut chars_to_remove = 0;
+        let mut indent_width = 0;
+        for ch in line_text.chars() {
+            if indent_width >= tab_width {
+                break;
+            }
+
+            match ch {
+                ' ' => {
+                    chars_to_remove += 1;
+                    indent_width += 1;
+                }
+                '\t' => {
+                    chars_to_remove += 1;
+                    break;
+                }
+                _ => break,
+            }
+        }
+
+        if chars_to_remove == 0 {
+            return;
+        }
+
+        let deleted_text: String = line_text.chars().take(chars_to_remove).collect();
+        self.undo_stack
+            .record_change(Change::delete(line, 0, deleted_text));
+
+        for _ in 0..chars_to_remove {
+            self.buffers[self.current_buffer_idx].delete_char(line, 0);
+        }
+
+        self.cursor.col = self.cursor.col.saturating_sub(chars_to_remove);
+        self.scroll_to_cursor();
     }
 
     /// Indent text object
@@ -6173,6 +7590,13 @@ impl Editor {
     pub fn dedent_text_object(&mut self, text_object: TextObject) {
         if let Some((start_line, _, end_line, _)) = self.find_text_object_range(text_object) {
             self.dedent_lines(start_line, end_line);
+        }
+    }
+
+    /// Auto-indent text object.
+    pub fn auto_indent_text_object(&mut self, text_object: TextObject) {
+        if let Some((start_line, _, end_line, _)) = self.find_text_object_range(text_object) {
+            self.auto_indent_lines(start_line, end_line);
         }
     }
 
@@ -6754,6 +8178,21 @@ impl Editor {
                 self.clamp_cursor();
                 self.scroll_to_cursor();
             }
+            Motion::DisplayLineDown => {
+                self.move_display_lines(true, count);
+            }
+            Motion::DisplayLineUp => {
+                self.move_display_lines(false, count);
+            }
+            Motion::DisplayLineStart => {
+                self.move_to_display_line_position(DisplayLineTarget::Start);
+            }
+            Motion::DisplayLineEnd => {
+                self.move_to_display_line_position(DisplayLineTarget::End);
+            }
+            Motion::DisplayLineFirstNonBlank => {
+                self.move_to_display_line_position(DisplayLineTarget::FirstNonBlank);
+            }
             _ => {
                 // Use standard motion handling
                 if let Some((new_line, new_col)) = apply_motion(
@@ -6771,6 +8210,189 @@ impl Editor {
                 }
             }
         }
+    }
+
+    fn move_display_lines(&mut self, down: bool, count: usize) {
+        if !self.settings.editor.wrap || self.effective_wrap_width() == 0 {
+            let fallback = if down { Motion::Down } else { Motion::Up };
+            if let Some((new_line, new_col)) = apply_motion(
+                &self.buffers[self.current_buffer_idx],
+                fallback,
+                self.cursor.line,
+                self.cursor.col,
+                count,
+                self.text_rows(),
+            ) {
+                self.cursor.line = new_line;
+                self.cursor.col = new_col;
+                self.clamp_cursor();
+                self.scroll_to_cursor();
+            }
+            return;
+        }
+
+        for _ in 0..count.max(1) {
+            if !self.move_display_line_once(down) {
+                break;
+            }
+        }
+
+        self.clamp_cursor();
+        self.scroll_to_cursor();
+    }
+
+    fn move_display_line_once(&mut self, down: bool) -> bool {
+        let tab_width = self.get_effective_tab_width();
+        let wrap_width = self.effective_wrap_width();
+        let current_line = self.cursor.line;
+        let current_text = self
+            .buffers
+            .get(self.current_buffer_idx)
+            .and_then(|buffer| buffer.line(current_line))
+            .map(|line| line.to_string())
+            .unwrap_or_default();
+        let current_segments = Self::display_line_segments(&current_text, wrap_width, tab_width);
+        let (segment_idx, display_col) = Self::display_segment_for_col(
+            &current_text,
+            &current_segments,
+            self.cursor.col,
+            tab_width,
+        );
+
+        if down {
+            if segment_idx + 1 < current_segments.len() {
+                let target_segment = current_segments[segment_idx + 1];
+                self.cursor.col = Self::display_col_to_buffer_col(
+                    &current_text,
+                    target_segment,
+                    display_col,
+                    tab_width,
+                );
+                return true;
+            }
+
+            let next_line = current_line + 1;
+            if next_line >= self.buffers[self.current_buffer_idx].len_lines() {
+                return false;
+            }
+
+            let next_text = self
+                .buffers
+                .get(self.current_buffer_idx)
+                .and_then(|buffer| buffer.line(next_line))
+                .map(|line| line.to_string())
+                .unwrap_or_default();
+            let next_segments = Self::display_line_segments(&next_text, wrap_width, tab_width);
+            self.cursor.line = next_line;
+            self.cursor.col = Self::display_col_to_buffer_col(
+                &next_text,
+                next_segments[0],
+                display_col,
+                tab_width,
+            );
+            return true;
+        }
+
+        if segment_idx > 0 {
+            let target_segment = current_segments[segment_idx - 1];
+            self.cursor.col = Self::display_col_to_buffer_col(
+                &current_text,
+                target_segment,
+                display_col,
+                tab_width,
+            );
+            return true;
+        }
+
+        let Some(prev_line) = current_line.checked_sub(1) else {
+            return false;
+        };
+
+        let prev_text = self
+            .buffers
+            .get(self.current_buffer_idx)
+            .and_then(|buffer| buffer.line(prev_line))
+            .map(|line| line.to_string())
+            .unwrap_or_default();
+        let prev_segments = Self::display_line_segments(&prev_text, wrap_width, tab_width);
+        let target_segment = prev_segments[prev_segments.len().saturating_sub(1)];
+        self.cursor.line = prev_line;
+        self.cursor.col =
+            Self::display_col_to_buffer_col(&prev_text, target_segment, display_col, tab_width);
+        true
+    }
+
+    fn move_to_display_line_position(&mut self, target: DisplayLineTarget) {
+        if !self.settings.editor.wrap || self.effective_wrap_width() == 0 {
+            let fallback = match target {
+                DisplayLineTarget::Start => Motion::LineStart,
+                DisplayLineTarget::End => Motion::LineEnd,
+                DisplayLineTarget::FirstNonBlank => Motion::FirstNonBlank,
+            };
+            if let Some((new_line, new_col)) = apply_motion(
+                &self.buffers[self.current_buffer_idx],
+                fallback,
+                self.cursor.line,
+                self.cursor.col,
+                1,
+                self.text_rows(),
+            ) {
+                self.cursor.line = new_line;
+                self.cursor.col = new_col;
+                self.clamp_cursor();
+                self.scroll_to_cursor();
+            }
+            return;
+        }
+
+        let tab_width = self.get_effective_tab_width();
+        let wrap_width = self.effective_wrap_width();
+        let current_line = self.cursor.line;
+        let current_text = self
+            .buffers
+            .get(self.current_buffer_idx)
+            .and_then(|buffer| buffer.line(current_line))
+            .map(|line| line.to_string())
+            .unwrap_or_default();
+        let segments = Self::display_line_segments(&current_text, wrap_width, tab_width);
+        let (segment_idx, _) =
+            Self::display_segment_for_col(&current_text, &segments, self.cursor.col, tab_width);
+        let segment = segments[segment_idx];
+
+        self.cursor.col = match target {
+            DisplayLineTarget::Start => segment.start_col,
+            DisplayLineTarget::End => segment.end_col.saturating_sub(1),
+            DisplayLineTarget::FirstNonBlank => {
+                Self::display_line_first_non_blank_col(&current_text, segment, tab_width)
+            }
+        };
+        self.clamp_cursor();
+        self.scroll_to_cursor();
+    }
+
+    fn display_line_first_non_blank_col(
+        line: &str,
+        segment: DisplayLineSegment,
+        tab_width: usize,
+    ) -> usize {
+        if segment.end_col <= segment.start_col {
+            return segment.start_col;
+        }
+
+        line.chars()
+            .enumerate()
+            .skip(segment.start_col)
+            .take(segment.end_col - segment.start_col)
+            .find_map(|(idx, ch)| {
+                if ch == '\n' {
+                    None
+                } else if Self::display_char_width(ch, tab_width) > 0 && !ch.is_whitespace() {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(segment.start_col)
     }
 
     /// Find first non-blank character on a line
@@ -7223,7 +8845,11 @@ impl Editor {
         if idx >= self.buffers.len() {
             return false;
         }
+        if idx == self.current_buffer_idx {
+            return true;
+        }
 
+        self.remember_current_file_as_alternate();
         self.save_pane_state();
         self.current_buffer_idx = idx;
         self.load_current_undo_stack();
@@ -7452,6 +9078,211 @@ mod tests {
     }
 
     #[test]
+    fn open_url_under_cursor_uses_url_token_without_trailing_punctuation() {
+        let mut editor = Editor::default();
+        editor.replace_buffer_content("see (https://example.test/docs?q=nevi).\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = "see (https://example".chars().count();
+
+        let mut opened = Vec::new();
+        let opened_url = editor
+            .open_url_under_cursor_with(|url| {
+                opened.push(url.to_string());
+                Ok(())
+            })
+            .expect("open url");
+
+        assert_eq!(opened_url, "https://example.test/docs?q=nevi");
+        assert_eq!(opened, vec!["https://example.test/docs?q=nevi"]);
+    }
+
+    #[test]
+    fn equalize_windows_restores_even_vertical_pane_rects() {
+        let mut editor = Editor::default();
+        editor.set_size(100, 20);
+        editor.vsplit(None).expect("first split");
+        editor.vsplit(None).expect("second split");
+
+        editor.panes[0].rect = super::Rect::new(0, 0, 10, 5);
+        editor.panes[1].rect = super::Rect::new(10, 0, 70, 5);
+        editor.panes[2].rect = super::Rect::new(80, 0, 20, 5);
+
+        editor.equalize_windows();
+
+        let widths: Vec<u16> = editor.panes.iter().map(|pane| pane.rect.width).collect();
+        assert_eq!(widths, vec![33, 33, 34]);
+        assert_eq!(editor.status_message.as_deref(), Some("Windows equalized"));
+    }
+
+    #[test]
+    fn rotate_windows_moves_panes_down_right_and_up_left() {
+        let tmp = unique_temp_dir("nevi_rotate_windows");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let first = tmp.join("first.txt");
+        let second = tmp.join("second.txt");
+        let third = tmp.join("third.txt");
+        std::fs::write(&first, "first\n").expect("write first");
+        std::fs::write(&second, "second\n").expect("write second");
+        std::fs::write(&third, "third\n").expect("write third");
+
+        let mut editor = Editor::default();
+        editor.open_file(first).expect("open first");
+        editor.vsplit(Some(second)).expect("split second");
+        editor.vsplit(Some(third)).expect("split third");
+        editor.prev_pane();
+        let active_buffer = editor.panes[editor.active_pane].buffer_idx;
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        editor.rotate_windows_down_right();
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![2, 0, 1]
+        );
+        assert_eq!(editor.panes[editor.active_pane].buffer_idx, active_buffer);
+        assert_eq!(editor.status_message.as_deref(), Some("Windows rotated"));
+
+        editor.rotate_windows_up_left();
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(editor.panes[editor.active_pane].buffer_idx, active_buffer);
+        assert_eq!(
+            editor.status_message.as_deref(),
+            Some("Windows rotated reverse")
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn display_line_motions_move_within_wrapped_lines() {
+        let mut editor = Editor::default();
+        editor.set_size(40, 12);
+        editor.settings.editor.wrap = true;
+        editor.settings.editor.wrap_width = 5;
+        editor.settings.editor.line_numbers = false;
+        editor.replace_buffer_content("abcdefghij\nklmno\n");
+        editor.cursor.line = 0;
+        editor.cursor.col = 1;
+
+        editor.apply_motion(Motion::DisplayLineDown, 1);
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 6));
+
+        editor.apply_motion(Motion::DisplayLineDown, 1);
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (1, 1));
+
+        editor.apply_motion(Motion::DisplayLineUp, 2);
+
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 1));
+    }
+
+    #[test]
+    fn display_line_horizontal_motions_target_current_wrapped_row() {
+        let mut editor = Editor::default();
+        editor.set_size(40, 12);
+        editor.settings.editor.wrap = true;
+        editor.settings.editor.wrap_width = 5;
+        editor.settings.editor.line_numbers = false;
+        editor.replace_buffer_content("  abcdefghij\n");
+        editor.cursor.line = 0;
+
+        editor.cursor.col = 6;
+        editor.apply_motion(Motion::DisplayLineStart, 1);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+
+        editor.cursor.col = 6;
+        editor.apply_motion(Motion::DisplayLineEnd, 1);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 7));
+
+        editor.cursor.col = 6;
+        editor.apply_motion(Motion::DisplayLineFirstNonBlank, 1);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 5));
+
+        editor.cursor.col = 3;
+        editor.apply_motion(Motion::DisplayLineFirstNonBlank, 1);
+        assert_eq!((editor.cursor.line, editor.cursor.col), (0, 2));
+    }
+
+    #[test]
+    fn exchange_window_swaps_current_with_next_or_previous_at_end() {
+        let tmp = unique_temp_dir("nevi_exchange_window");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let first = tmp.join("first.txt");
+        let second = tmp.join("second.txt");
+        let third = tmp.join("third.txt");
+        std::fs::write(&first, "first\n").expect("write first");
+        std::fs::write(&second, "second\n").expect("write second");
+        std::fs::write(&third, "third\n").expect("write third");
+
+        let mut editor = Editor::default();
+        editor.open_file(first).expect("open first");
+        editor.vsplit(Some(second)).expect("split second");
+        editor.vsplit(Some(third)).expect("split third");
+        editor.prev_pane();
+        let active_buffer = editor.panes[editor.active_pane].buffer_idx;
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        editor.exchange_window_with_next();
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 1]
+        );
+        assert_eq!(editor.active_pane, 2);
+        assert_eq!(editor.panes[editor.active_pane].buffer_idx, active_buffer);
+        assert_eq!(editor.status_message.as_deref(), Some("Windows exchanged"));
+
+        editor.exchange_window_with_next();
+
+        assert_eq!(
+            editor
+                .panes
+                .iter()
+                .map(|pane| pane.buffer_idx)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(editor.active_pane, 1);
+        assert_eq!(editor.panes[editor.active_pane].buffer_idx, active_buffer);
+        assert_eq!(editor.status_message.as_deref(), Some("Windows exchanged"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn undo_history_follows_the_active_buffer() {
         let tmp = unique_temp_dir("nevi_undo_per_buffer");
         std::fs::create_dir_all(&tmp).expect("create temp dir");
@@ -7486,30 +9317,18 @@ mod tests {
         std::fs::write(&markdown, "# Seed\n").expect("write markdown");
 
         let mut editor = Editor::default();
-        editor
-            .open_file(markdown)
-            .expect("open markdown buffer");
+        editor.open_file(markdown).expect("open markdown buffer");
         editor.replace_buffer_content("# Before\n");
 
         editor.open_markdown_preview().expect("open preview");
         assert_eq!(
-            editor
-                .markdown_preview
-                .as_ref()
-                .expect("preview")
-                .lines[0]
-                .plain_text(),
+            editor.markdown_preview.as_ref().expect("preview").lines[0].plain_text(),
             "Before"
         );
 
         editor.replace_buffer_content("# After\n");
         assert_eq!(
-            editor
-                .markdown_preview
-                .as_ref()
-                .expect("preview")
-                .lines[0]
-                .plain_text(),
+            editor.markdown_preview.as_ref().expect("preview").lines[0].plain_text(),
             "Before"
         );
 
@@ -7542,9 +9361,7 @@ mod tests {
         std::fs::write(&markdown, "# Seed\n").expect("write markdown");
 
         let mut editor = Editor::default();
-        editor
-            .open_file(markdown)
-            .expect("open markdown buffer");
+        editor.open_file(markdown).expect("open markdown buffer");
         editor.replace_buffer_content(&(0..20).map(|i| format!("line {i}\n")).collect::<String>());
         editor.open_markdown_preview().expect("open preview");
 
