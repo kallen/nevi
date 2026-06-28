@@ -743,6 +743,7 @@ When the file explorer sidebar is focused:
 | `r` | Rename selected item |
 | `d` | Delete selected item |
 | `/` | Search explorer |
+| `Ctrl+w` / `Ctrl+u` | Delete previous word / delete to start in explorer search |
 | `n` / `N` | Next/previous search match |
 | `c` | Copy selected item |
 | `x` | Cut selected item |

@@ -1318,7 +1318,8 @@ impl FileExplorer {
 
     /// Insert character into search buffer
     pub fn search_insert(&mut self, c: char) {
-        self.search_buffer.insert(self.search_cursor, c);
+        let byte_idx = self.search_char_to_byte_index(self.search_cursor);
+        self.search_buffer.insert(byte_idx, c);
         self.search_cursor += 1;
         self.update_search_matches();
     }
@@ -1327,9 +1328,64 @@ impl FileExplorer {
     pub fn search_backspace(&mut self) {
         if self.search_cursor > 0 {
             self.search_cursor -= 1;
-            self.search_buffer.remove(self.search_cursor);
+            let byte_idx = self.search_char_to_byte_index(self.search_cursor);
+            self.search_buffer.remove(byte_idx);
             self.update_search_matches();
         }
+    }
+
+    /// Delete the word before the search cursor, matching Vim command-line Ctrl+w.
+    pub fn search_delete_word_before(&mut self) {
+        if self.search_cursor == 0 {
+            return;
+        }
+
+        let chars: Vec<char> = self.search_buffer.chars().collect();
+        let start_cursor = self.search_cursor.min(chars.len());
+        let mut cursor = start_cursor;
+
+        while cursor > 0 && chars[cursor - 1].is_whitespace() {
+            cursor -= 1;
+        }
+
+        if cursor > 0 {
+            let delete_word_chars = chars[cursor - 1].is_alphanumeric() || chars[cursor - 1] == '_';
+            if delete_word_chars {
+                while cursor > 0
+                    && (chars[cursor - 1].is_alphanumeric() || chars[cursor - 1] == '_')
+                {
+                    cursor -= 1;
+                }
+            } else {
+                while cursor > 0 {
+                    let ch = chars[cursor - 1];
+                    if ch.is_whitespace() || ch.is_alphanumeric() || ch == '_' {
+                        break;
+                    }
+                    cursor -= 1;
+                }
+            }
+        }
+
+        if cursor < start_cursor {
+            let start_byte = self.search_char_to_byte_index(cursor);
+            let end_byte = self.search_char_to_byte_index(start_cursor);
+            self.search_buffer.replace_range(start_byte..end_byte, "");
+            self.search_cursor = cursor;
+            self.update_search_matches();
+        }
+    }
+
+    /// Delete from the search cursor back to the start of the search query.
+    pub fn search_delete_to_start(&mut self) {
+        if self.search_cursor == 0 {
+            return;
+        }
+
+        let end_byte = self.search_char_to_byte_index(self.search_cursor);
+        self.search_buffer.replace_range(0..end_byte, "");
+        self.search_cursor = 0;
+        self.update_search_matches();
     }
 
     /// Move search cursor left
@@ -1341,9 +1397,17 @@ impl FileExplorer {
 
     /// Move search cursor right
     pub fn search_cursor_right(&mut self) {
-        if self.search_cursor < self.search_buffer.len() {
+        if self.search_cursor < self.search_buffer.chars().count() {
             self.search_cursor += 1;
         }
+    }
+
+    fn search_char_to_byte_index(&self, char_idx: usize) -> usize {
+        self.search_buffer
+            .char_indices()
+            .map(|(byte_idx, _)| byte_idx)
+            .nth(char_idx)
+            .unwrap_or(self.search_buffer.len())
     }
 
     /// Update search matches based on current query
@@ -1496,6 +1560,38 @@ mod tests {
 
         explorer.move_page_up(10);
         assert_eq!(explorer.selected, 0);
+    }
+
+    #[test]
+    fn search_ctrl_w_deletes_previous_word_and_refreshes_matches() {
+        let mut explorer = explorer_with_flat_rows(12);
+        explorer.flat_view[1].name = "file_1 match.txt".to_string();
+        explorer.start_search();
+        for ch in "file_1 file_".chars() {
+            explorer.search_insert(ch);
+        }
+
+        explorer.search_delete_word_before();
+
+        assert_eq!(explorer.search_buffer, "file_1 ");
+        assert_eq!(explorer.search_cursor, "file_1 ".chars().count());
+        assert_eq!(explorer.search_matches, vec![1]);
+        assert_eq!(explorer.selected, 1);
+    }
+
+    #[test]
+    fn search_ctrl_u_deletes_to_start_and_refreshes_matches() {
+        let mut explorer = explorer_with_flat_rows(12);
+        explorer.start_search();
+        for ch in "file_1".chars() {
+            explorer.search_insert(ch);
+        }
+
+        explorer.search_delete_to_start();
+
+        assert_eq!(explorer.search_buffer, "");
+        assert_eq!(explorer.search_cursor, 0);
+        assert!(explorer.search_matches.is_empty());
     }
 
     #[test]

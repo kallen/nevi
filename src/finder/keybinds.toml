@@ -1667,6 +1667,18 @@ desc = "Search explorer"
 status = "implemented"
 
 [[explorer.search]]
+key = "<C-w>"
+action = "search_delete_word_before"
+desc = "Delete previous search word"
+status = "implemented"
+
+[[explorer.search]]
+key = "<C-u>"
+action = "search_delete_to_start"
+desc = "Delete search query to start"
+status = "implemented"
+
+[[explorer.search]]
 key = "n"
 action = "next_match"
 desc = "Next search match"

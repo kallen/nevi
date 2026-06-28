@@ -8473,6 +8473,13 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
             (KeyModifiers::NONE, KeyCode::Backspace) => {
                 editor.explorer.search_backspace();
             }
+            // Delete previous word / delete to start, matching command-line editing.
+            (KeyModifiers::CONTROL, KeyCode::Char('w')) => {
+                editor.explorer.search_delete_word_before();
+            }
+            (KeyModifiers::CONTROL, KeyCode::Char('u')) => {
+                editor.explorer.search_delete_to_start();
+            }
             // Move cursor left
             (KeyModifiers::NONE, KeyCode::Left) => {
                 editor.explorer.search_cursor_left();
@@ -10042,6 +10049,27 @@ mod tests {
             }),
             "filtered keymaps should include explorer mappings"
         );
+    }
+
+    #[test]
+    fn explorer_search_ctrl_w_and_ctrl_u_edit_query() {
+        let mut editor = editor_with_explorer_rows(12);
+        editor.explorer.flat_view[1].name = "file_1 match.txt".to_string();
+
+        handle_key(&mut editor, key('/'));
+        for ch in "file_1 file_".chars() {
+            handle_key(&mut editor, key(ch));
+        }
+
+        handle_key(&mut editor, ctrl_key('w'));
+        assert_eq!(editor.mode, Mode::Explorer);
+        assert!(editor.explorer.is_searching);
+        assert_eq!(editor.explorer.search_buffer, "file_1 ");
+        assert_eq!(editor.explorer.search_matches, vec![1]);
+
+        handle_key(&mut editor, ctrl_key('u'));
+        assert_eq!(editor.explorer.search_buffer, "");
+        assert!(editor.explorer.search_matches.is_empty());
     }
 
     #[test]

@@ -438,6 +438,14 @@ vim_default = true
             }),
             "explorer help mapping should appear"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains("<C-w>")
+                    && item.display.contains("search word")
+            }),
+            "explorer search Ctrl+w mapping should appear"
+        );
     }
 
     #[test]
