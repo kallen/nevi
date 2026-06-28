@@ -365,6 +365,7 @@ impl FileExplorer {
 
             self.rebuild_flat_view();
             self.restore_selection(preferred_path, fallback_index);
+            self.rebuild_search_matches(true);
         }
     }
 
@@ -1412,6 +1413,11 @@ impl FileExplorer {
 
     /// Update search matches based on current query
     fn update_search_matches(&mut self) {
+        self.rebuild_search_matches(false);
+    }
+
+    fn rebuild_search_matches(&mut self, preserve_selected: bool) {
+        let selected_before = self.selected;
         self.search_matches.clear();
         self.current_match = 0;
 
@@ -1428,6 +1434,18 @@ impl FileExplorer {
 
         // Jump to first match
         if !self.search_matches.is_empty() {
+            if preserve_selected {
+                if let Some(match_idx) = self
+                    .search_matches
+                    .iter()
+                    .position(|&idx| idx == selected_before)
+                {
+                    self.current_match = match_idx;
+                    self.selected = selected_before;
+                    return;
+                }
+            }
+
             self.selected = self.search_matches[0];
         }
     }
@@ -1458,9 +1476,8 @@ impl FileExplorer {
     /// Keeps matches so n/N can continue navigating
     pub fn confirm_search(&mut self) {
         self.is_searching = false;
-        self.search_buffer.clear();
-        self.search_cursor = 0;
-        // Keep search_matches and current_match for n/N navigation
+        self.search_cursor = self.search_buffer.chars().count();
+        // Keep the query and matches so refresh and n/N navigation stay in sync.
     }
 
     /// Clear search matches (called when selection changes manually)
@@ -1592,6 +1609,72 @@ mod tests {
         assert_eq!(explorer.search_buffer, "");
         assert_eq!(explorer.search_cursor, 0);
         assert!(explorer.search_matches.is_empty());
+    }
+
+    #[test]
+    fn refresh_rebuilds_confirmed_search_matches() {
+        let root = unique_temp_dir("nevi_explorer_refresh_rebuild");
+        std::fs::create_dir_all(&root).expect("create root");
+        let alpha = root.join("alpha-match.rs");
+        let delta = root.join("delta-match.rs");
+        std::fs::write(&alpha, "").expect("write alpha file");
+        std::fs::write(root.join("beta.rs"), "").expect("write beta file");
+        std::fs::write(&delta, "").expect("write delta file");
+
+        let mut explorer = FileExplorer::new();
+        explorer.set_root(root.clone());
+        explorer.start_search();
+        for ch in "match".chars() {
+            explorer.search_insert(ch);
+        }
+        explorer.confirm_search();
+
+        std::fs::write(root.join("charlie-match.rs"), "").expect("write inserted match");
+        explorer.refresh();
+
+        let matched_names: Vec<String> = explorer
+            .search_matches
+            .iter()
+            .map(|idx| explorer.flat_view[*idx].name.clone())
+            .collect();
+        assert_eq!(
+            matched_names,
+            vec![
+                "alpha-match.rs".to_string(),
+                "charlie-match.rs".to_string(),
+                "delta-match.rs".to_string(),
+            ]
+        );
+        assert_eq!(explorer.search_buffer, "match");
+
+        explorer.next_match();
+        assert_eq!(
+            explorer.selected_path(),
+            Some(&root.join("charlie-match.rs"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cancel_search_clears_query_so_refresh_does_not_rebuild_matches() {
+        let root = unique_temp_dir("nevi_explorer_cancel_refresh");
+        std::fs::create_dir_all(&root).expect("create root");
+        std::fs::write(root.join("alpha-match.rs"), "").expect("write alpha file");
+
+        let mut explorer = FileExplorer::new();
+        explorer.set_root(root.clone());
+        explorer.start_search();
+        for ch in "match".chars() {
+            explorer.search_insert(ch);
+        }
+        explorer.cancel_search();
+        explorer.refresh();
+
+        assert!(explorer.search_buffer.is_empty());
+        assert!(explorer.search_matches.is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
