@@ -1358,6 +1358,7 @@ impl Editor {
     pub fn new(settings: Settings) -> Self {
         let (keymap, keymap_errors) = KeymapLookup::from_settings(&settings.keymap);
         let finder = FuzzyFinder::from_settings(&settings.finder);
+        let explorer_width = settings.explorer.width;
 
         // Initialize theme manager with bundled + user themes
         let mut theme_manager = ThemeManager::new();
@@ -1423,7 +1424,7 @@ impl Editor {
             show_diagnostic_float: false,
             search_matches: Vec::new(),
             project_root: None,
-            explorer: FileExplorer::new(),
+            explorer: FileExplorer::with_width(explorer_width),
             harpoon: crate::harpoon::Harpoon::new(),
             pending_format: false,
             save_after_format: false,
@@ -9179,6 +9180,27 @@ impl Editor {
         self.refresh_explorer_git_statuses();
         self.update_pane_rects();
         self.mode = Mode::Explorer;
+    }
+
+    /// Increase the file explorer sidebar width.
+    pub fn widen_explorer(&mut self) {
+        self.explorer.widen();
+        self.update_pane_rects();
+        self.set_status(format!("Explorer width: {}", self.explorer.width));
+    }
+
+    /// Decrease the file explorer sidebar width.
+    pub fn narrow_explorer(&mut self) {
+        self.explorer.narrow();
+        self.update_pane_rects();
+        self.set_status(format!("Explorer width: {}", self.explorer.width));
+    }
+
+    /// Reset the file explorer sidebar width to the configured default.
+    pub fn reset_explorer_width(&mut self) {
+        self.explorer.set_width(self.settings.explorer.width);
+        self.update_pane_rects();
+        self.set_status(format!("Explorer width: {}", self.explorer.width));
     }
 
     /// Close the file explorer sidebar

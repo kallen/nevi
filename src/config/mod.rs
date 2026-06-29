@@ -9,6 +9,8 @@ pub mod languages;
 use serde::Deserialize;
 use std::path::PathBuf;
 
+use crate::explorer::DEFAULT_EXPLORER_WIDTH;
+
 pub use keymap::{CommandModeAction, KeymapLookup, LeaderAction, LeaderHint};
 pub use languages::{load_languages_config, FormatterConfig, LanguageConfig, LanguagesConfig};
 
@@ -19,6 +21,7 @@ pub struct Settings {
     pub editor: EditorSettings,
     pub theme: ThemeSettings,
     pub terminal: TerminalSettings,
+    pub explorer: ExplorerSettings,
     pub keymap: KeymapSettings,
     pub finder: FinderSettings,
     pub lsp: LspSettings,
@@ -31,6 +34,7 @@ impl Default for Settings {
             editor: EditorSettings::default(),
             theme: ThemeSettings::default(),
             terminal: TerminalSettings::default(),
+            explorer: ExplorerSettings::default(),
             keymap: KeymapSettings::default(),
             finder: FinderSettings::default(),
             lsp: LspSettings::default(),
@@ -122,6 +126,22 @@ impl Default for ThemeSettings {
     fn default() -> Self {
         Self {
             colorscheme: "onedark".to_string(),
+        }
+    }
+}
+
+/// File explorer settings
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ExplorerSettings {
+    /// Width of the file explorer sidebar in terminal columns.
+    pub width: u16,
+}
+
+impl Default for ExplorerSettings {
+    fn default() -> Self {
+        Self {
+            width: DEFAULT_EXPLORER_WIDTH,
         }
     }
 }
@@ -868,6 +888,13 @@ fn default_config_template() -> &'static str {
 #   "*-build"   - ends with -build (matches aws-build, my-build, etc.)
 #   "tmp*"      - starts with tmp
 #   "*test*"    - contains test
+
+# ============================================================================
+# FILE EXPLORER
+# ============================================================================
+# [explorer]
+# width = 35                  # Sidebar width in terminal columns
+#
 
 # ============================================================================
 # KEYMAP CUSTOMIZATION

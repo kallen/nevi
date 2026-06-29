@@ -446,6 +446,14 @@ vim_default = true
             }),
             "explorer search Ctrl+w mapping should appear"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("expl")
+                    && item.display.contains(">")
+                    && item.display.to_lowercase().contains("widen")
+            }),
+            "explorer width resize mappings should appear"
+        );
     }
 
     #[test]

@@ -4,6 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::git::{GitFileStatus, GitRepo};
 
+pub const DEFAULT_EXPLORER_WIDTH: u16 = 35;
+pub const MIN_EXPLORER_WIDTH: u16 = 20;
+pub const MAX_EXPLORER_WIDTH: u16 = 80;
+pub const EXPLORER_WIDTH_STEP: u16 = 5;
+
 /// Pending action in the file explorer
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExplorerAction {
@@ -161,7 +166,7 @@ impl Default for FileExplorer {
             selected: 0,
             flat_view: Vec::new(),
             visible: false,
-            width: 35,
+            width: DEFAULT_EXPLORER_WIDTH,
             pending_action: None,
             input_buffer: String::new(),
             input_cursor: 0,
@@ -180,6 +185,28 @@ impl Default for FileExplorer {
 impl FileExplorer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_width(width: u16) -> Self {
+        let mut explorer = Self::default();
+        explorer.set_width(width);
+        explorer
+    }
+
+    pub fn clamp_width(width: u16) -> u16 {
+        width.clamp(MIN_EXPLORER_WIDTH, MAX_EXPLORER_WIDTH)
+    }
+
+    pub fn set_width(&mut self, width: u16) {
+        self.width = Self::clamp_width(width);
+    }
+
+    pub fn widen(&mut self) {
+        self.set_width(self.width.saturating_add(EXPLORER_WIDTH_STEP));
+    }
+
+    pub fn narrow(&mut self) {
+        self.set_width(self.width.saturating_sub(EXPLORER_WIDTH_STEP));
     }
 
     /// Set the root directory and build the tree

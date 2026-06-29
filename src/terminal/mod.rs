@@ -8724,6 +8724,17 @@ fn handle_explorer_mode(editor: &mut Editor, key: KeyEvent) {
             editor.unfocus_explorer();
         }
 
+        // Resize explorer sidebar
+        (KeyModifiers::SHIFT, KeyCode::Char('>')) | (KeyModifiers::NONE, KeyCode::Char('>')) => {
+            editor.widen_explorer();
+        }
+        (KeyModifiers::SHIFT, KeyCode::Char('<')) | (KeyModifiers::NONE, KeyCode::Char('<')) => {
+            editor.narrow_explorer();
+        }
+        (KeyModifiers::NONE, KeyCode::Char('=')) => {
+            editor.reset_explorer_width();
+        }
+
         // Add file/folder
         (KeyModifiers::NONE, KeyCode::Char('a')) => {
             editor.explorer.start_add();
@@ -10143,6 +10154,40 @@ mod tests {
 
         handle_key(&mut editor, ctrl_key('b'));
         assert_eq!(editor.explorer.selected, 10);
+    }
+
+    #[test]
+    fn explorer_width_keys_resize_and_reset_sidebar() {
+        let settings: Settings = toml::from_str(
+            r#"
+            [explorer]
+            width = 42
+            "#,
+        )
+        .expect("parse settings");
+        let mut editor = Editor::new(settings);
+        editor.set_size(100, 24);
+        editor.open_explorer();
+
+        assert_eq!(editor.explorer.width, 42);
+        assert_eq!(editor.panes()[0].rect.x, 43);
+
+        handle_key(&mut editor, key('>'));
+        assert_eq!(editor.mode, Mode::Explorer);
+        assert_eq!(editor.explorer.width, 47);
+        assert_eq!(editor.panes()[0].rect.x, 48);
+
+        handle_key(&mut editor, key('<'));
+        assert_eq!(editor.explorer.width, 42);
+        assert_eq!(editor.panes()[0].rect.x, 43);
+
+        handle_key(&mut editor, key('>'));
+        handle_key(&mut editor, key('>'));
+        assert_eq!(editor.explorer.width, 52);
+
+        handle_key(&mut editor, key('='));
+        assert_eq!(editor.explorer.width, 42);
+        assert_eq!(editor.panes()[0].rect.x, 43);
     }
 
     #[test]

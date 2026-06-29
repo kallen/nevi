@@ -22,6 +22,15 @@ To disable the leader popup while keeping leader mappings active:
 show_leader_popup = false
 ```
 
+### Configuring Explorer Width
+
+The file explorer sidebar is `35` columns wide by default. To change that:
+
+```toml
+[explorer]
+width = 42
+```
+
 ### Remapping Keys in Normal Mode
 
 Want `H` to go to the start of the line and `L` to go to the end? Add this:
@@ -750,6 +759,9 @@ When the file explorer sidebar is focused:
 | `?` | Show explorer keymaps |
 | `-` | Go to parent directory |
 | `Ctrl+l` | Focus editor and keep explorer open |
+| `>` | Widen explorer sidebar |
+| `<` | Narrow explorer sidebar |
+| `=` | Reset explorer sidebar width |
 | `a` | Create file or directory |
 | `r` | Rename selected item |
 | `d` | Delete selected item |

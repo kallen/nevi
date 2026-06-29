@@ -1624,6 +1624,24 @@ action = "focus_editor"
 desc = "Focus editor and keep explorer open"
 status = "implemented"
 
+[[explorer.layout]]
+key = ">"
+action = "widen_sidebar"
+desc = "Widen explorer sidebar"
+status = "implemented"
+
+[[explorer.layout]]
+key = "<"
+action = "narrow_sidebar"
+desc = "Narrow explorer sidebar"
+status = "implemented"
+
+[[explorer.layout]]
+key = "="
+action = "reset_sidebar_width"
+desc = "Reset explorer sidebar width"
+status = "implemented"
+
 [[explorer.files]]
 key = "a"
 action = "create"
