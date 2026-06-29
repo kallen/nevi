@@ -1172,6 +1172,16 @@ pub struct CommandLine {
     pub pending_register: bool,
     /// Waiting to insert the next key literally after command-line Ctrl+v/Ctrl+q
     pub pending_literal: bool,
+    /// Waiting for one or two digraph characters after command-line Ctrl+k
+    pub pending_digraph: PendingDigraph,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PendingDigraph {
+    #[default]
+    None,
+    First,
+    Second(char),
 }
 
 impl CommandLine {
@@ -1208,6 +1218,7 @@ impl CommandLine {
         self.history_popup_index = 0;
         self.pending_register = false;
         self.pending_literal = false;
+        self.pending_digraph = PendingDigraph::None;
     }
 
     /// Convert char index to byte index

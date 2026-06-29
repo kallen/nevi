@@ -828,6 +828,7 @@ While typing an Ex command after `:`.
 | `Ctrl+u` | Delete from cursor to beginning of command line |
 | `Ctrl+r {reg}` | Insert register contents |
 | `Ctrl+v` / `Ctrl+q` | Insert the next key literally |
+| `Ctrl+k {char1}{char2}` | Insert a Vim-compatible digraph, for example `a:` -> `ä` |
 | `Ctrl+d` | List command-line completions |
 | `Ctrl+l` | Complete longest common command prefix |
 | `Ctrl+a` | Insert all matching command completions |

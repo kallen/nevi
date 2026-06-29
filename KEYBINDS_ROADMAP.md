@@ -4,7 +4,7 @@ Nevi aims for full vim/neovim keybind compatibility. Defaults follow Neovim, and
 keybinds are configurable — sensible defaults out of the box, overridable to your
 own taste.
 
-**Status: 299 keybinds implemented, 66 planned Vim/Neovim parity defaults.**
+**Status: 300 keybinds implemented, 65 planned Vim/Neovim parity defaults.**
 
 This file tracks what's **planned** (not yet implemented). For the full list of
 keybinds that already work, see [KEYBINDINGS.md](KEYBINDINGS.md).
@@ -28,7 +28,6 @@ These apply while editing the command prompt after `:`.
 
 | Keybind | Planned behavior |
 |---------|------------------|
-| `Ctrl+k` | Enter a digraph |
 | `q:` | Open command-line history in the command-line window |
 | `q/` | Open `/` search history in the command-line window |
 | `q?` | Open `?` search history in the command-line window |
