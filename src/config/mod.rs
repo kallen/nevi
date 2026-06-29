@@ -274,6 +274,11 @@ impl Default for KeymapSettings {
                     desc: Some("Insert next key literally".to_string()),
                 },
                 CommandModeMapping {
+                    key: "<C-k>".to_string(),
+                    action: "insert_digraph".to_string(),
+                    desc: Some("Insert digraph".to_string()),
+                },
+                CommandModeMapping {
                     key: "<A-r>".to_string(),
                     action: "history_toggle".to_string(),
                     desc: Some("Toggle command history window".to_string()),
@@ -516,7 +521,7 @@ pub struct LeaderMapping {
 pub struct CommandModeMapping {
     /// Key notation (e.g., "<C-r>", "<A-r>", "<Tab>", "<BackTab>")
     pub key: String,
-    /// Action name (insert_register, insert_literal, history_toggle, list_completions, complete_longest_common_prefix, insert_all_completions, open_command_line_window, complete, complete_prev, popup_next, popup_prev)
+    /// Action name (insert_register, insert_literal, insert_digraph, history_toggle, list_completions, complete_longest_common_prefix, insert_all_completions, open_command_line_window, complete, complete_prev, popup_next, popup_prev)
     pub action: String,
     /// Optional description for docs/which-key style UIs
     #[serde(default)]
@@ -1285,6 +1290,7 @@ fn default_config_template() -> &'static str {
 # Ctrl+u           - Delete from cursor to beginning of command line
 # Ctrl+r {reg}     - Insert register contents
 # Ctrl+v / Ctrl+q  - Insert next key literally
+# Ctrl+k {c1}{c2}  - Insert Vim-compatible digraph (example: a: -> ä)
 # Ctrl+d           - List command-line completions
 # Ctrl+l           - Complete longest common command prefix
 # Ctrl+a           - Insert all matching command completions
@@ -1338,6 +1344,11 @@ fn default_config_template() -> &'static str {
 # key = "<C-v>"
 # action = "insert_literal"
 # desc = "Insert next key literally"
+#
+# [[keymap.command_mappings]]
+# key = "<C-k>"
+# action = "insert_digraph"
+# desc = "Insert digraph"
 #
 # [[keymap.command_mappings]]
 # key = "<C-j>"

@@ -44,6 +44,8 @@ pub enum CommandModeAction {
     InsertRegister,
     /// Insert the next typed key literally into the command line
     InsertLiteral,
+    /// Insert a digraph into the command line
+    InsertDigraph,
     /// Show available command-line completions
     ListCompletions,
     /// Complete the longest common command-line completion prefix
@@ -570,6 +572,7 @@ fn parse_command_mode_action(action: &str) -> Option<CommandModeAction> {
         "history_toggle" => Some(CommandModeAction::HistoryToggle),
         "insert_register" => Some(CommandModeAction::InsertRegister),
         "insert_literal" => Some(CommandModeAction::InsertLiteral),
+        "insert_digraph" => Some(CommandModeAction::InsertDigraph),
         "list_completions" => Some(CommandModeAction::ListCompletions),
         "complete_longest_common_prefix" => Some(CommandModeAction::CompleteLongestCommonPrefix),
         "insert_all_completions" => Some(CommandModeAction::InsertAllCompletions),
@@ -771,6 +774,21 @@ mod tests {
         assert_eq!(
             lookup.get_command_action(ctrl_q),
             Some(CommandModeAction::InsertLiteral)
+        );
+    }
+
+    #[test]
+    fn default_command_mappings_include_digraph_entry() {
+        use super::super::KeymapSettings;
+
+        let (lookup, errors) = KeymapLookup::from_settings(&KeymapSettings::default());
+        assert!(errors.is_empty(), "default keymap should parse cleanly");
+
+        let ctrl_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            lookup.get_command_action(ctrl_k),
+            Some(CommandModeAction::InsertDigraph)
         );
     }
 

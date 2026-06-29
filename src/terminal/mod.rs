@@ -55,7 +55,7 @@ fn finder_preview_match_ranges(line: &str, query: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
-use crate::commands::{parse_command, Command, CommandPopupMode, CommandResult};
+use crate::commands::{parse_command, Command, CommandPopupMode, CommandResult, PendingDigraph};
 use crate::config::{CommandModeAction, LeaderAction};
 use crate::editor::{
     Editor, ExpressionRegisterTarget, LspAction, Mode, Pane, PaneDirection, SplitLayout,
@@ -7630,6 +7630,9 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
         CommandModeAction::InsertLiteral => {
             editor.command_line.pending_literal = true;
         }
+        CommandModeAction::InsertDigraph => {
+            editor.command_line.pending_digraph = PendingDigraph::First;
+        }
         CommandModeAction::ListCompletions => {
             editor.command_line.list_completions();
         }
@@ -7667,6 +7670,11 @@ fn execute_command_mode_action(editor: &mut Editor, action: CommandModeAction) {
 }
 
 fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
+    if editor.command_line.pending_digraph != PendingDigraph::None {
+        handle_command_digraph_key(editor, key);
+        return;
+    }
+
     if editor.command_line.pending_literal {
         editor.command_line.pending_literal = false;
         if let Some(ch) = command_literal_char(key) {
@@ -7780,6 +7788,39 @@ fn handle_command_mode(editor: &mut Editor, key: KeyEvent) {
     }
 }
 
+fn handle_command_digraph_key(editor: &mut Editor, key: KeyEvent) {
+    match editor.command_line.pending_digraph {
+        PendingDigraph::None => {}
+        PendingDigraph::First => {
+            if let Some(first) = command_digraph_char(key) {
+                editor.command_line.pending_digraph = PendingDigraph::Second(first);
+            } else {
+                editor.command_line.pending_digraph = PendingDigraph::None;
+            }
+        }
+        PendingDigraph::Second(first) => {
+            editor.command_line.pending_digraph = PendingDigraph::None;
+            let Some(second) = command_digraph_char(key) else {
+                return;
+            };
+            if let Some(ch) = vim_latin1_digraph(first, second) {
+                editor.command_line.insert_char(ch);
+            } else {
+                editor.set_status(format!("Unknown digraph: {first}{second}"));
+            }
+        }
+    }
+}
+
+fn command_digraph_char(key: KeyEvent) -> Option<char> {
+    match (key.modifiers, key.code) {
+        (KeyModifiers::NONE, KeyCode::Char(ch))
+        | (KeyModifiers::SHIFT, KeyCode::Char(ch))
+        | (KeyModifiers::ALT, KeyCode::Char(ch)) => Some(ch),
+        _ => None,
+    }
+}
+
 fn command_literal_char(key: KeyEvent) -> Option<char> {
     match key.code {
         KeyCode::Char(c) if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -7817,6 +7858,85 @@ fn control_literal_char(ch: char) -> Option<char> {
         _ => return None,
     };
     char::from_u32(code as u32)
+}
+
+fn vim_latin1_digraph(first: char, second: char) -> Option<char> {
+    match (first, second) {
+        ('A', '!') => Some('À'),
+        ('A', '\'') => Some('Á'),
+        ('A', '>') => Some('Â'),
+        ('A', '?') => Some('Ã'),
+        ('A', ':') => Some('Ä'),
+        ('A', 'A') => Some('Å'),
+        ('A', 'E') => Some('Æ'),
+        ('C', ',') => Some('Ç'),
+        ('E', '!') => Some('È'),
+        ('E', '\'') => Some('É'),
+        ('E', '>') => Some('Ê'),
+        ('E', ':') => Some('Ë'),
+        ('I', '!') => Some('Ì'),
+        ('I', '\'') => Some('Í'),
+        ('I', '>') => Some('Î'),
+        ('I', ':') => Some('Ï'),
+        ('N', '?') => Some('Ñ'),
+        ('O', '!') => Some('Ò'),
+        ('O', '\'') => Some('Ó'),
+        ('O', '>') => Some('Ô'),
+        ('O', '?') => Some('Õ'),
+        ('O', ':') => Some('Ö'),
+        ('O', '/') => Some('Ø'),
+        ('U', '!') => Some('Ù'),
+        ('U', '\'') => Some('Ú'),
+        ('U', '>') => Some('Û'),
+        ('U', ':') => Some('Ü'),
+        ('Y', '\'') => Some('Ý'),
+        ('T', 'H') => Some('Þ'),
+        ('s', 's') => Some('ß'),
+        ('a', '!') => Some('à'),
+        ('a', '\'') => Some('á'),
+        ('a', '>') => Some('â'),
+        ('a', '?') => Some('ã'),
+        ('a', ':') => Some('ä'),
+        ('a', 'a') => Some('å'),
+        ('a', 'e') => Some('æ'),
+        ('c', ',') => Some('ç'),
+        ('e', '!') => Some('è'),
+        ('e', '\'') => Some('é'),
+        ('e', '>') => Some('ê'),
+        ('e', ':') => Some('ë'),
+        ('i', '!') => Some('ì'),
+        ('i', '\'') => Some('í'),
+        ('i', '>') => Some('î'),
+        ('i', ':') => Some('ï'),
+        ('n', '?') => Some('ñ'),
+        ('o', '!') => Some('ò'),
+        ('o', '\'') => Some('ó'),
+        ('o', '>') => Some('ô'),
+        ('o', '?') => Some('õ'),
+        ('o', ':') => Some('ö'),
+        ('o', '/') => Some('ø'),
+        ('u', '!') => Some('ù'),
+        ('u', '\'') => Some('ú'),
+        ('u', '>') => Some('û'),
+        ('u', ':') => Some('ü'),
+        ('y', '\'') => Some('ý'),
+        ('t', 'h') => Some('þ'),
+        ('y', ':') => Some('ÿ'),
+        ('<', '<') => Some('«'),
+        ('>', '>') => Some('»'),
+        ('!', 'I') => Some('¡'),
+        ('?', 'I') => Some('¿'),
+        ('C', 'o') => Some('©'),
+        ('R', 'g') => Some('®'),
+        ('+', '-') => Some('±'),
+        ('D', 'G') => Some('°'),
+        ('*', 'X') => Some('×'),
+        ('-', ':') => Some('÷'),
+        ('1', '2') => Some('½'),
+        ('1', '4') => Some('¼'),
+        ('3', '4') => Some('¾'),
+        _ => None,
+    }
 }
 
 fn handle_search_mode(editor: &mut Editor, key: KeyEvent) {
@@ -10090,6 +10210,34 @@ mod tests {
             editor.command_line.cursor,
             "write keep\u{17}".chars().count()
         );
+    }
+
+    #[test]
+    fn command_ctrl_k_inserts_vim_digraph() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("echo ");
+
+        handle_key(&mut editor, ctrl_key('k'));
+        handle_key(&mut editor, key('a'));
+        handle_key(&mut editor, key(':'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "echo ä");
+        assert_eq!(editor.command_line.cursor, "echo ä".chars().count());
+    }
+
+    #[test]
+    fn command_ctrl_k_inserts_second_vim_digraph() {
+        let mut editor = Editor::default();
+        editor.enter_command_mode_with_input("echo ");
+
+        handle_key(&mut editor, ctrl_key('k'));
+        handle_key(&mut editor, key('n'));
+        handle_key(&mut editor, key('?'));
+
+        assert_eq!(editor.mode, Mode::Command);
+        assert_eq!(editor.command_line.input, "echo ñ");
+        assert_eq!(editor.command_line.cursor, "echo ñ".chars().count());
     }
 
     #[test]
