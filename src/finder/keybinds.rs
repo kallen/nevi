@@ -504,6 +504,22 @@ vim_default = true
             }),
             "search prompt Ctrl+e should appear in :Keymaps"
         );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("search")
+                    && item.display.contains("<Up>")
+                    && item.display.contains("history")
+            }),
+            "search prompt Up history mapping should appear in :Keymaps"
+        );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("search")
+                    && item.display.contains("<Down>")
+                    && item.display.contains("history")
+            }),
+            "search prompt Down history mapping should appear in :Keymaps"
+        );
     }
 
     #[test]
