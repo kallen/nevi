@@ -7807,6 +7807,14 @@ fn handle_search_mode(editor: &mut Editor, key: KeyEvent) {
         (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
             editor.search.move_to_end();
         }
+        (KeyModifiers::NONE, KeyCode::Up) => {
+            editor.search.history_prev();
+            editor.update_incremental_search();
+        }
+        (KeyModifiers::NONE, KeyCode::Down) => {
+            editor.search.history_next();
+            editor.update_incremental_search();
+        }
 
         // Regular character - accept any modifier for printable chars
         (_, KeyCode::Char(c)) if !c.is_control() => {
@@ -9776,6 +9784,18 @@ mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT)
     }
 
+    fn enter_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+    }
+
+    fn up_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)
+    }
+
+    fn down_key() -> KeyEvent {
+        KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
+    }
+
     fn esc_key() -> KeyEvent {
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
     }
@@ -9835,6 +9855,68 @@ mod tests {
         assert_eq!(editor.mode, Mode::Search);
         assert_eq!(editor.search.input, "naive");
         assert_eq!(editor.search.cursor, "naive".chars().count());
+    }
+
+    #[test]
+    fn search_up_down_navigates_search_history() {
+        let mut editor = Editor::default();
+
+        editor.enter_search_forward();
+        editor.search.input = "alpha".to_string();
+        editor.search.cursor = "alpha".chars().count();
+        handle_key(&mut editor, enter_key());
+
+        editor.enter_search_forward();
+        editor.search.input = "beta".to_string();
+        editor.search.cursor = "beta".chars().count();
+        handle_key(&mut editor, enter_key());
+
+        editor.enter_search_forward();
+        handle_key(&mut editor, up_key());
+        assert_eq!(editor.mode, Mode::Search);
+        assert_eq!(editor.search.input, "beta");
+        assert_eq!(editor.search.cursor, "beta".chars().count());
+
+        handle_key(&mut editor, up_key());
+        assert_eq!(editor.search.input, "alpha");
+        assert_eq!(editor.search.cursor, "alpha".chars().count());
+
+        handle_key(&mut editor, down_key());
+        assert_eq!(editor.search.input, "beta");
+        assert_eq!(editor.search.cursor, "beta".chars().count());
+
+        handle_key(&mut editor, down_key());
+        assert_eq!(editor.search.input, "");
+        assert_eq!(editor.search.cursor, 0);
+    }
+
+    #[test]
+    fn search_history_restores_in_progress_input_and_resets_after_edit() {
+        let mut editor = Editor::default();
+
+        editor.enter_search_forward();
+        editor.search.input = "stored".to_string();
+        editor.search.cursor = "stored".chars().count();
+        handle_key(&mut editor, enter_key());
+
+        editor.enter_search_forward();
+        editor.search.input = "draft".to_string();
+        editor.search.cursor = "draft".chars().count();
+        handle_key(&mut editor, up_key());
+        assert_eq!(editor.search.input, "stored");
+
+        handle_key(&mut editor, down_key());
+        assert_eq!(editor.search.input, "draft");
+        assert_eq!(editor.search.cursor, "draft".chars().count());
+
+        handle_key(&mut editor, up_key());
+        handle_key(&mut editor, key('x'));
+        assert_eq!(editor.search.input, "storedx");
+        assert_eq!(editor.search.cursor, "storedx".chars().count());
+
+        handle_key(&mut editor, down_key());
+        assert_eq!(editor.search.input, "storedx");
+        assert_eq!(editor.search.cursor, "storedx".chars().count());
     }
 
     #[test]

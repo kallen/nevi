@@ -258,6 +258,8 @@ pub enum SearchDirection {
     Backward,
 }
 
+const MAX_SEARCH_HISTORY_ENTRIES: usize = 100;
+
 /// Search state
 #[derive(Debug, Clone, Default)]
 pub struct SearchState {
@@ -271,6 +273,12 @@ pub struct SearchState {
     pub last_pattern: Option<String>,
     /// Last search direction
     pub last_direction: SearchDirection,
+    /// Previously executed non-empty search patterns.
+    pub history: Vec<String>,
+    /// Current index while navigating search history.
+    pub history_index: Option<usize>,
+    /// In-progress search input saved before history navigation begins.
+    pub saved_input: Option<String>,
 }
 
 impl SearchState {
@@ -278,6 +286,8 @@ impl SearchState {
     pub fn clear(&mut self) {
         self.input.clear();
         self.cursor = 0;
+        self.history_index = None;
+        self.saved_input = None;
     }
 
     /// Start a new search
@@ -285,6 +295,8 @@ impl SearchState {
         self.input.clear();
         self.cursor = 0;
         self.direction = direction;
+        self.history_index = None;
+        self.saved_input = None;
     }
 
     /// Insert a character at cursor (cursor is character index, not byte index)
@@ -293,6 +305,7 @@ impl SearchState {
         let byte_idx = self.char_to_byte_index(self.cursor);
         self.input.insert(byte_idx, ch);
         self.cursor += 1;
+        self.on_input_edited();
     }
 
     /// Delete character before cursor
@@ -302,6 +315,7 @@ impl SearchState {
             // Convert character index to byte index for String::remove
             let byte_idx = self.char_to_byte_index(self.cursor);
             self.input.remove(byte_idx);
+            self.on_input_edited();
         }
     }
 
@@ -329,6 +343,41 @@ impl SearchState {
         self.cursor = self.input.chars().count();
     }
 
+    /// Navigate to previous search history entry.
+    pub fn history_prev(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+
+        match self.history_index {
+            None => {
+                self.saved_input = Some(self.input.clone());
+                self.history_index = Some(self.history.len() - 1);
+                self.input = self.history[self.history.len() - 1].clone();
+            }
+            Some(idx) if idx > 0 => {
+                self.history_index = Some(idx - 1);
+                self.input = self.history[idx - 1].clone();
+            }
+            _ => {}
+        }
+        self.cursor = self.char_count();
+    }
+
+    /// Navigate to next search history entry.
+    pub fn history_next(&mut self) {
+        if let Some(idx) = self.history_index {
+            if idx + 1 < self.history.len() {
+                self.history_index = Some(idx + 1);
+                self.input = self.history[idx + 1].clone();
+            } else {
+                self.history_index = None;
+                self.input = self.saved_input.take().unwrap_or_default();
+            }
+            self.cursor = self.char_count();
+        }
+    }
+
     /// Convert character index to byte index
     fn char_to_byte_index(&self, char_idx: usize) -> usize {
         self.input
@@ -338,16 +387,43 @@ impl SearchState {
             .unwrap_or(self.input.len())
     }
 
+    fn char_count(&self) -> usize {
+        self.input.chars().count()
+    }
+
     /// Execute search and save pattern
     pub fn execute(&mut self) -> Option<String> {
         if self.input.is_empty() {
             // Use last pattern if input is empty
             self.last_pattern.clone()
         } else {
-            self.last_pattern = Some(self.input.clone());
+            let pattern = self.input.clone();
+            self.record_history(pattern.clone());
+            self.last_pattern = Some(pattern.clone());
             self.last_direction = self.direction;
-            Some(self.input.clone())
+            Some(pattern)
         }
+    }
+
+    fn record_history(&mut self, pattern: String) {
+        if let Some(existing_idx) = self.history.iter().position(|entry| entry == &pattern) {
+            self.history.remove(existing_idx);
+        }
+        self.history.push(pattern);
+        if self.history.len() > MAX_SEARCH_HISTORY_ENTRIES {
+            let extra = self
+                .history
+                .len()
+                .saturating_sub(MAX_SEARCH_HISTORY_ENTRIES);
+            self.history.drain(0..extra);
+        }
+        self.history_index = None;
+        self.saved_input = None;
+    }
+
+    fn on_input_edited(&mut self) {
+        self.history_index = None;
+        self.saved_input = None;
     }
 
     /// Get the display string for the search prompt

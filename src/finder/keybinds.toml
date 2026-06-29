@@ -2197,6 +2197,20 @@ desc = "Move to end of search input"
 status = "implemented"
 vim_default = true
 
+[[search.editing]]
+key = "<Up>"
+action = "search_prompt_history_prev"
+desc = "Navigate to previous search history entry"
+status = "implemented"
+vim_default = true
+
+[[search.editing]]
+key = "<Down>"
+action = "search_prompt_history_next"
+desc = "Navigate to next search history entry"
+status = "implemented"
+vim_default = true
+
 # ============================================================================
 # COMMAND MODE (Ex commands)
 # ============================================================================
