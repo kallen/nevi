@@ -319,6 +319,16 @@ impl SearchState {
         }
     }
 
+    /// Move cursor to beginning of search input
+    pub fn move_to_start(&mut self) {
+        self.cursor = 0;
+    }
+
+    /// Move cursor to end of search input
+    pub fn move_to_end(&mut self) {
+        self.cursor = self.input.chars().count();
+    }
+
     /// Convert character index to byte index
     fn char_to_byte_index(&self, char_idx: usize) -> usize {
         self.input

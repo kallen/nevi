@@ -2180,6 +2180,24 @@ status = "implemented"
 vim_default = true
 
 # ============================================================================
+# SEARCH PROMPT EDITING (while typing `/` or `?`)
+# ============================================================================
+
+[[search.editing]]
+key = "<C-b>"
+action = "search_prompt_begin"
+desc = "Move to beginning of search input"
+status = "implemented"
+vim_default = true
+
+[[search.editing]]
+key = "<C-e>"
+action = "search_prompt_end"
+desc = "Move to end of search input"
+status = "implemented"
+vim_default = true
+
+# ============================================================================
 # COMMAND MODE (Ex commands)
 # ============================================================================
 

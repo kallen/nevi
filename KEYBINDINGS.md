@@ -336,6 +336,15 @@ Operators are commands that wait for a motion. For example, `d` (delete) + `w` (
 
 > **Tip:** Search supports regex. Use `\c` at the start for case-insensitive search (e.g., `/\cfoo`).
 
+### Search Prompt Editing
+
+While typing a `/` or `?` search prompt.
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+b` | Move to beginning of search input |
+| `Ctrl+e` | Move to end of search input |
+
 ---
 
 ## Marks

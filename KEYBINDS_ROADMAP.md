@@ -4,7 +4,7 @@ Nevi aims for full vim/neovim keybind compatibility. Defaults follow Neovim, and
 keybinds are configurable — sensible defaults out of the box, overridable to your
 own taste.
 
-**Status: 293 keybinds implemented, 74 planned Vim/Neovim parity defaults.**
+**Status: 295 keybinds implemented, 72 planned Vim/Neovim parity defaults.**
 
 This file tracks what's **planned** (not yet implemented). For the full list of
 keybinds that already work, see [KEYBINDINGS.md](KEYBINDINGS.md).
@@ -43,8 +43,6 @@ These apply while editing `/` and `?` search prompts.
 
 | Keybind | Planned behavior |
 |---------|------------------|
-| `Ctrl+b` | Move to beginning of the search input |
-| `Ctrl+e` | Move to end of the search input |
 | `Ctrl+w` | Delete the word before the cursor |
 | `Ctrl+u` | Delete from cursor back to the start of the search input |
 | `Ctrl+r {reg}` | Insert register contents into the search prompt |

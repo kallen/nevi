@@ -486,6 +486,27 @@ vim_default = true
     }
 
     #[test]
+    fn picker_includes_builtin_search_prompt_editing_keys() {
+        let items = keymap_finder_items(&KeymapSettings::default());
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("search")
+                    && item.display.contains("<C-b>")
+                    && item.display.contains("beginning")
+            }),
+            "search prompt Ctrl+b should appear in :Keymaps"
+        );
+        assert!(
+            items.iter().any(|item| {
+                item.display.contains("search")
+                    && item.display.contains("<C-e>")
+                    && item.display.contains("end")
+            }),
+            "search prompt Ctrl+e should appear in :Keymaps"
+        );
+    }
+
+    #[test]
     fn picker_includes_leader_popup_trigger() {
         let items = keymap_finder_items(&KeymapSettings::default());
         assert!(

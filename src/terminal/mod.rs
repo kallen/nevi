@@ -7801,6 +7801,12 @@ fn handle_search_mode(editor: &mut Editor, key: KeyEvent) {
         (KeyModifiers::NONE, KeyCode::Right) => {
             editor.search.move_right();
         }
+        (KeyModifiers::CONTROL, KeyCode::Char('b')) => {
+            editor.search.move_to_start();
+        }
+        (KeyModifiers::CONTROL, KeyCode::Char('e')) => {
+            editor.search.move_to_end();
+        }
 
         // Regular character - accept any modifier for printable chars
         (_, KeyCode::Char(c)) if !c.is_control() => {
@@ -9801,6 +9807,34 @@ mod tests {
         assert_eq!(editor.mode, Mode::Command);
         assert_eq!(editor.command_line.input, "write buffer");
         assert_eq!(editor.command_line.cursor, "write buffer".chars().count());
+    }
+
+    #[test]
+    fn search_ctrl_b_moves_to_beginning_of_search_prompt() {
+        let mut editor = Editor::default();
+        editor.enter_search_forward();
+        editor.search.input = "needle".to_string();
+        editor.search.cursor = 4;
+
+        handle_key(&mut editor, ctrl_key('b'));
+
+        assert_eq!(editor.mode, Mode::Search);
+        assert_eq!(editor.search.input, "needle");
+        assert_eq!(editor.search.cursor, 0);
+    }
+
+    #[test]
+    fn search_ctrl_e_moves_to_end_of_search_prompt() {
+        let mut editor = Editor::default();
+        editor.enter_search_backward();
+        editor.search.input = "naive".to_string();
+        editor.search.cursor = 2;
+
+        handle_key(&mut editor, ctrl_key('e'));
+
+        assert_eq!(editor.mode, Mode::Search);
+        assert_eq!(editor.search.input, "naive");
+        assert_eq!(editor.search.cursor, "naive".chars().count());
     }
 
     #[test]

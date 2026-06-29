@@ -1179,6 +1179,10 @@ fn default_config_template() -> &'static str {
 # Shift+Tab        - Accept previous completion
 # Ctrl+n / Ctrl+p  - Next / previous popup item
 #
+# Search prompt mode (while typing `/` or `?`):
+# Ctrl+b           - Move to beginning of search input
+# Ctrl+e           - Move to end of search input
+#
 # ============================================================================
 # CUSTOM KEYBIND EXAMPLES
 # ============================================================================
