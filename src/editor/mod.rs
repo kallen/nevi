@@ -1726,14 +1726,55 @@ impl Editor {
         Ok(())
     }
 
-    /// Open a snapshot health report in the read-only preview overlay.
+    /// Open a health report in a read-only virtual buffer.
     pub fn open_health_report(&mut self) {
         let report = crate::health::collect_health_report(&self.settings);
-        let rendered = crate::markdown_preview::render_markdown(&report);
-        let width = crate::markdown_preview::preview_content_width(self.term_width);
-        self.markdown_preview = Some(crate::markdown_preview::MarkdownPreviewState::with_title(
-            rendered, width, "Health",
-        ));
+        self.open_virtual_read_only_buffer("[health]", &report, Some("health.md"));
+    }
+
+    /// Open named content that is not backed by a file and cannot be edited.
+    pub fn open_virtual_read_only_buffer(
+        &mut self,
+        name: impl Into<String>,
+        content: &str,
+        syntax_hint_path: Option<&str>,
+    ) {
+        let new_buffer = Buffer::virtual_read_only(
+            name,
+            content,
+            syntax_hint_path.map(std::path::PathBuf::from),
+        );
+        self.markdown_preview = None;
+
+        if self.buffers[self.current_buffer_idx].is_empty()
+            && self.buffers[self.current_buffer_idx].path.is_none()
+        {
+            self.buffers[self.current_buffer_idx] = new_buffer;
+            self.reset_current_undo_stack();
+        } else {
+            self.remember_current_file_as_alternate();
+            self.save_pane_state();
+            self.buffers.push(new_buffer);
+            self.undo_stacks.push(UndoStack::new());
+            self.current_buffer_idx = self.buffers.len() - 1;
+            self.load_current_undo_stack();
+            if self.active_pane < self.panes.len() {
+                self.panes[self.active_pane].buffer_idx = self.current_buffer_idx;
+            }
+        }
+
+        self.cursor = Cursor::default();
+        self.viewport_offset = 0;
+        self.h_offset = 0;
+        self.reset_current_undo_stack();
+
+        if self.active_pane < self.panes.len() {
+            self.panes[self.active_pane].cursor = self.cursor;
+            self.panes[self.active_pane].viewport_offset = self.viewport_offset;
+            self.panes[self.active_pane].h_offset = self.h_offset;
+        }
+
+        self.sync_syntax_to_current_buffer();
     }
 
     /// Open the user's config file, creating the default template first if needed.
@@ -2345,6 +2386,23 @@ impl Editor {
         &mut self.buffers[self.current_buffer_idx]
     }
 
+    fn reject_read_only_edit(&mut self) -> bool {
+        if self.buffers[self.current_buffer_idx].is_read_only() {
+            self.set_status("Buffer is read-only");
+            return true;
+        }
+        false
+    }
+
+    fn sync_syntax_to_current_buffer(&mut self) {
+        let syntax_hint = self.buffers[self.current_buffer_idx]
+            .syntax_hint_path()
+            .cloned();
+        self.syntax
+            .set_language_from_path_option(syntax_hint.as_ref());
+        self.parse_current_buffer();
+    }
+
     fn save_current_undo_stack(&mut self) {
         if let Some(stack) = self.undo_stacks.get_mut(self.current_buffer_idx) {
             *stack = self.undo_stack.clone();
@@ -2514,9 +2572,7 @@ impl Editor {
             self.current_buffer_idx = self.panes[self.active_pane].buffer_idx;
             self.load_current_undo_stack();
             // Re-parse syntax for the buffer
-            let path = self.buffers[self.current_buffer_idx].path.clone();
-            self.syntax.set_language_from_path_option(path.as_ref());
-            self.parse_current_buffer();
+            self.sync_syntax_to_current_buffer();
         }
     }
 
@@ -3097,7 +3153,7 @@ impl Editor {
 
     /// Set the path of the current buffer (for rename operations)
     pub fn set_buffer_path(&mut self, path: std::path::PathBuf) {
-        self.buffers[self.current_buffer_idx].path = Some(path.clone());
+        self.buffers[self.current_buffer_idx].set_file_path(path.clone());
         // Update syntax highlighting for new filename
         self.syntax.set_language_from_path(&path);
         self.parse_current_buffer();
@@ -3227,6 +3283,9 @@ impl Editor {
     }
 
     fn enter_insert_mode_at_change(&mut self, line: usize, col: usize) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         self.mode = Mode::Insert;
         self.begin_insert_session();
         self.cursor.line = line.min(
@@ -3981,6 +4040,9 @@ impl Editor {
 
     /// Enter insert mode
     pub fn enter_insert_mode(&mut self) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
         self.begin_insert_session();
@@ -3989,6 +4051,9 @@ impl Editor {
 
     /// Enter insert mode after cursor
     pub fn enter_insert_mode_append(&mut self) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         let line_len = self.buffers[self.current_buffer_idx].line_len(self.cursor.line);
         if line_len > 0 {
             self.cursor.col = (self.cursor.col + 1).min(line_len);
@@ -4001,6 +4066,9 @@ impl Editor {
 
     /// Enter insert mode at end of line
     pub fn enter_insert_mode_end(&mut self) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         self.cursor.col = self.buffers[self.current_buffer_idx].line_len(self.cursor.line);
         self.last_insert_position = Some((self.cursor.line, self.cursor.col));
         self.mode = Mode::Insert;
@@ -4010,6 +4078,9 @@ impl Editor {
 
     /// Enter insert mode at start of line (first non-blank)
     pub fn enter_insert_mode_start(&mut self) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         // Find first non-blank character
         let line_len = self.buffers[self.current_buffer_idx].line_len(self.cursor.line);
         for col in 0..line_len {
@@ -4341,6 +4412,9 @@ impl Editor {
 
     /// Insert a character at cursor position
     pub fn insert_char(&mut self, ch: char) {
+        if self.reject_read_only_edit() {
+            return;
+        }
         if ch == '\n' && self.settings.editor.auto_indent {
             self.insert_newline_with_indent();
         } else if matches!(ch, '}' | ']' | ')') && self.settings.editor.auto_indent {
@@ -4937,6 +5011,10 @@ impl Editor {
 
     /// Save the current buffer
     pub fn save(&mut self) -> anyhow::Result<()> {
+        if self.buffers[self.current_buffer_idx].is_read_only() {
+            self.set_status("Buffer is read-only");
+            anyhow::bail!("Buffer is read-only");
+        }
         self.buffers[self.current_buffer_idx].save()?;
         self.status_message = Some(format!(
             "\"{}\" written",
@@ -5182,7 +5260,10 @@ impl Editor {
 
     /// Save to a specific file
     pub fn save_as(&mut self, path: std::path::PathBuf) -> anyhow::Result<()> {
-        self.buffers[self.current_buffer_idx].path = Some(path);
+        if self.buffers[self.current_buffer_idx].is_read_only() {
+            anyhow::bail!("Buffer is read-only");
+        }
+        self.buffers[self.current_buffer_idx].set_file_path(path);
         self.save()
     }
 
@@ -9680,9 +9761,7 @@ impl Editor {
         self.cursor = Cursor::default();
         self.viewport_offset = 0;
         self.h_offset = 0;
-        let path = self.buffers[self.current_buffer_idx].path.clone();
-        self.syntax.set_language_from_path_option(path.as_ref());
-        self.parse_current_buffer();
+        self.sync_syntax_to_current_buffer();
         true
     }
 
@@ -10257,6 +10336,78 @@ mod tests {
 
         assert!(result.is_err());
         assert!(editor.markdown_preview.is_none());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn health_report_opens_as_read_only_virtual_buffer() {
+        let mut editor = Editor::default();
+
+        editor.open_health_report();
+
+        assert!(editor.markdown_preview.is_none());
+        assert_eq!(editor.buffer().display_name(), "[health]");
+        assert!(editor.buffer().is_read_only());
+        assert!(editor.buffer().path.is_none());
+        assert!(!editor.buffer().dirty);
+        let content = editor.buffer().content();
+        assert!(content.contains("# Nevi Health"));
+        assert!(content.contains("## Configuration"));
+        assert!(content.contains("## Keymaps"));
+        assert!(content.contains("## Performance"));
+        assert!(content.contains("## LSP"));
+    }
+
+    #[test]
+    fn read_only_virtual_buffer_rejects_insert_input() {
+        let mut editor = Editor::default();
+        editor.open_virtual_read_only_buffer("[scratch]", "alpha\n", Some("scratch.md"));
+
+        editor.enter_insert_mode();
+        assert_eq!(editor.mode, Mode::Normal);
+        editor.insert_char('x');
+
+        assert_eq!(editor.buffer().content(), "alpha\n");
+        assert!(!editor.buffer().dirty);
+        assert_eq!(
+            editor.status_message.as_deref(),
+            Some("Buffer is read-only")
+        );
+    }
+
+    #[test]
+    fn read_only_virtual_buffer_rejects_save() {
+        let mut editor = Editor::default();
+        editor.open_virtual_read_only_buffer("[scratch]", "alpha\n", Some("scratch.md"));
+
+        let err = editor.save().expect_err("virtual buffer save should fail");
+
+        assert!(err.to_string().contains("Buffer is read-only"));
+        assert_eq!(
+            editor.status_message.as_deref(),
+            Some("Buffer is read-only")
+        );
+        assert!(!editor.buffer().dirty);
+    }
+
+    #[test]
+    fn virtual_buffer_preserves_syntax_hint_after_buffer_switch() {
+        let tmp = unique_temp_dir("nevi_virtual_buffer_syntax_switch");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let rust = tmp.join("main.rs");
+        std::fs::write(&rust, "fn main() {}\n").expect("write rust");
+
+        let mut editor = Editor::default();
+        editor.open_virtual_read_only_buffer("[scratch]", "# Scratch\n", Some("scratch.md"));
+        assert_eq!(editor.syntax.language_name(), Some("markdown"));
+
+        editor.open_file(rust).expect("open rust file");
+        assert_eq!(editor.syntax.language_name(), Some("rust"));
+
+        assert!(editor.switch_to_buffer(0));
+        assert_eq!(editor.buffer().display_name(), "[scratch]");
+        assert_eq!(editor.syntax.language_name(), Some("markdown"));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
