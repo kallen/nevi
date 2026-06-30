@@ -63,13 +63,18 @@ brew install nevi
 
 Nevi is currently macOS-only.
 
+Required for Homebrew install:
+
+- Homebrew. Build dependencies such as Rust are installed by the formula when
+  needed.
+
 Required to build from source:
 
 - Rust toolchain with `cargo`
 - Git, if cloning the repository with `git clone`
 - Xcode Command Line Tools if your Rust setup prompts for native build tools
 
-Required at runtime:
+Required at runtime after any install method:
 
 - A terminal emulator
 
