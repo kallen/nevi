@@ -142,7 +142,7 @@ nevi file1.rs file2.rs
 - `:w` - Save
 - `:q` - Quit
 - `:wq` - Save and quit
-- `:checkhealth` / `:Health` - Open editor health report
+- `:checkhealth` / `:Health` - Open editor health report in a read-only `[health]` buffer
 - `:ConfigOpen` / `:config` - Open your user config file
 - `:ConfigDefaults` - View the latest built-in default config template
 - `:MarkdownPreview` - Open rendered Markdown reader for `.md` files (`j/k`, `Ctrl-d/u`, `g/G`, `q`)
@@ -357,10 +357,12 @@ summary includes count, retained sample count, total, average, p50, p95, and max
 microseconds for metrics such as key handling, syntax updates, full renders, and
 terminal-only renders.
 
-Run `:checkhealth` (or `:Health`) inside Nevi to see config paths, config
-discoverability commands, keymap overrides and warnings, LSP settings, profiling
-status, and any profile summary from `/tmp/nevi_profile.log`. Profile summaries
-are written when a profiled Nevi session exits.
+Run `:checkhealth` (or `:Health`) inside Nevi to open a read-only `[health]`
+buffer with config paths, config discoverability commands, keymap overrides and
+warnings, LSP settings, profiling status, and any profile summary from
+`/tmp/nevi_profile.log`. Because it is a regular buffer, normal motions, search,
+and yank commands work there. Profile summaries are written when a profiled Nevi
+session exits.
 
 ## License
 

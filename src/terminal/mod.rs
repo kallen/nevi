@@ -10864,21 +10864,19 @@ mod tests {
     }
 
     #[test]
-    fn checkhealth_command_opens_health_report_preview() {
+    fn checkhealth_command_opens_health_report_buffer() {
         let mut editor = Editor::default();
 
         execute_command(&mut editor, Command::CheckHealth);
 
-        let preview = editor.markdown_preview.as_ref().expect("health preview");
-        assert_eq!(preview.title, "Health");
-        let text = preview
-            .lines
-            .iter()
-            .map(|line| line.plain_text())
-            .collect::<Vec<_>>()
-            .join("\n");
+        assert!(editor.markdown_preview.is_none());
+        assert_eq!(editor.buffer().display_name(), "[health]");
+        assert!(editor.buffer().is_read_only());
+        assert!(!editor.buffer().dirty);
+        let text = editor.buffer().content();
         assert!(text.contains("Nevi Health"));
         assert!(text.contains("Configuration"));
+        assert!(text.contains("Keymaps"));
         assert!(text.contains("Performance"));
         assert!(text.contains("LSP"));
     }

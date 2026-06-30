@@ -19,6 +19,18 @@ pub struct Buffer {
     version: u64,
     /// Last known modification time of the file on disk (for autoread)
     last_mtime: Option<SystemTime>,
+    kind: BufferKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BufferKind {
+    File,
+    Untitled,
+    Virtual {
+        name: String,
+        read_only: bool,
+        syntax_hint_path: Option<PathBuf>,
+    },
 }
 
 impl Buffer {
@@ -30,6 +42,7 @@ impl Buffer {
             dirty: false,
             version: 0,
             last_mtime: None,
+            kind: BufferKind::Untitled,
         }
     }
 
@@ -50,11 +63,63 @@ impl Buffer {
             dirty: false,
             version: 0,
             last_mtime,
+            kind: BufferKind::File,
         })
+    }
+
+    /// Create a named virtual buffer whose content is not backed by a file.
+    pub fn virtual_read_only(
+        name: impl Into<String>,
+        content: &str,
+        syntax_hint_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            text: Rope::from_str(content),
+            path: None,
+            dirty: false,
+            version: 0,
+            last_mtime: None,
+            kind: BufferKind::Virtual {
+                name: name.into(),
+                read_only: true,
+                syntax_hint_path,
+            },
+        }
+    }
+
+    /// Whether this buffer should reject direct content changes.
+    pub fn is_read_only(&self) -> bool {
+        matches!(
+            self.kind,
+            BufferKind::Virtual {
+                read_only: true,
+                ..
+            }
+        )
+    }
+
+    /// Mark this buffer as file-backed.
+    pub fn set_file_path(&mut self, path: PathBuf) {
+        self.path = Some(path);
+        self.kind = BufferKind::File;
+    }
+
+    /// Path used for syntax detection. Virtual buffers may provide a synthetic hint.
+    pub fn syntax_hint_path(&self) -> Option<&PathBuf> {
+        match &self.kind {
+            BufferKind::Virtual {
+                syntax_hint_path, ..
+            } => syntax_hint_path.as_ref(),
+            BufferKind::File | BufferKind::Untitled => self.path.as_ref(),
+        }
     }
 
     /// Save buffer to its file path
     pub fn save(&mut self) -> anyhow::Result<()> {
+        if self.is_read_only() {
+            anyhow::bail!("Buffer is read-only");
+        }
+
         let path = self
             .path
             .as_ref()
@@ -153,6 +218,9 @@ impl Buffer {
     /// Replace the entire buffer content with new text
     /// Used by external formatters to apply formatting
     pub fn set_content(&mut self, content: &str) {
+        if self.is_read_only() {
+            return;
+        }
         self.text = Rope::from_str(content);
         self.dirty = true;
         self.version = self.version.wrapping_add(1);
@@ -171,6 +239,9 @@ impl Buffer {
 
     /// Insert a character at the given line and column
     pub fn insert_char(&mut self, line: usize, col: usize, ch: char) {
+        if self.is_read_only() {
+            return;
+        }
         let idx = self.line_col_to_char(line, col);
         self.text.insert_char(idx, ch);
         self.dirty = true;
@@ -179,6 +250,9 @@ impl Buffer {
 
     /// Insert a string at the given line and column
     pub fn insert_str(&mut self, line: usize, col: usize, s: &str) {
+        if self.is_read_only() {
+            return;
+        }
         let idx = self.line_col_to_char(line, col);
         self.text.insert(idx, s);
         self.dirty = true;
@@ -187,6 +261,9 @@ impl Buffer {
 
     /// Delete a character at the given line and column
     pub fn delete_char(&mut self, line: usize, col: usize) {
+        if self.is_read_only() {
+            return;
+        }
         let idx = self.line_col_to_char(line, col);
         if idx < self.text.len_chars() {
             self.text.remove(idx..idx + 1);
@@ -203,6 +280,9 @@ impl Buffer {
         end_line: usize,
         end_col: usize,
     ) {
+        if self.is_read_only() {
+            return;
+        }
         let start = self.line_col_to_char(start_line, start_col);
         let end = self.line_col_to_char(end_line, end_col);
         if start < end && end <= self.text.len_chars() {
@@ -214,6 +294,9 @@ impl Buffer {
 
     /// Replace an entire line with new content
     pub fn replace_line(&mut self, line: usize, new_content: &str) {
+        if self.is_read_only() {
+            return;
+        }
         if line >= self.text.len_lines() {
             return;
         }
@@ -248,6 +331,9 @@ impl Buffer {
 
     /// Mark the buffer as modified
     pub fn mark_modified(&mut self) {
+        if self.is_read_only() {
+            return;
+        }
         self.dirty = true;
         self.version = self.version.wrapping_add(1);
     }
@@ -274,6 +360,10 @@ impl Buffer {
 
     /// Get the display name for the buffer
     pub fn display_name(&self) -> String {
+        if let BufferKind::Virtual { name, .. } = &self.kind {
+            return name.clone();
+        }
+
         self.path
             .as_ref()
             .and_then(|p| p.file_name())
